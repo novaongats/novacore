@@ -277,12 +277,15 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
 
 /* ====== PRINT ====== */
 @media print {
+  @page{size:A4;margin:10mm 15mm}
+  body{background:#fff!important}
   .sb,.tb,.no-print{display:none!important}
-  .mn{margin:0!important}
+  .mn{margin:0!important;background:#fff!important}
   .ct{overflow:visible!important}
   .ct .pg{padding:0!important}
   .ct iframe{position:static!important;height:auto!important;min-height:100vh}
   .hide{display:none!important}
+  .tbl th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 </style>
 
@@ -430,7 +433,7 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
 <div class="sb-grp um-only hide">管理</div>
 <button class="ni um-only hide" onclick="go('user_mgmt')"><span class="ic">👥</span>ユーザー管理</button>
 </div>
-<div class="sb-ft">有限会社NOVA</div>
+<div class="sb-ft"><button onclick="novaSyncManual()" style="background:rgba(99,102,241,0.12);color:#a5b4fc;border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;width:100%;margin-bottom:8px;font-family:inherit;transition:all .15s" onmouseover="this.style.background='rgba(99,102,241,0.25)'" onmouseout="this.style.background='rgba(99,102,241,0.12)'">🔄 データ同期</button><div>有限会社NOVA</div></div>
 </div>
 <div class="mn">
 <div class="tb">
@@ -455,6 +458,7 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
     <button class="mbtn" onclick="homeShowPost()" style="background:#6366f1">📋 連絡を投稿</button>
     <button class="mbtn" onclick="homeShowTask('public')" style="background:#7c3aed">✅ タスク追加</button>
     <button class="mbtn" onclick="homeShowTask('private')" style="background:#92400e">🔒 タスクを振る</button>
+    <button class="mbtn" onclick="novaSyncManual()" style="background:#1e293b;border:1px solid rgba(99,102,241,0.3)">🔄 同期</button>
   </div>
 </div>
 
@@ -674,7 +678,7 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
   <div style="display:flex;gap:8px">
     <button class="sbtn no-print" onclick="salesPrint()" style="font-size:11px;padding:6px 12px">🖨️ 印刷</button>
     <button class="sbtn no-print" onclick="salesPdf()" style="font-size:11px;padding:6px 12px;background:#ef4444;color:#fff;border-color:#ef4444">📄 PDF</button>
-    <button class="mbtn" onclick="salesShowAdd()" style="background:#6366f1">＋ 売上を追加</button>
+    <button class="mbtn no-print" onclick="salesShowAdd()" style="background:#6366f1">＋ 売上を追加</button>
   </div>
 </div>
 
@@ -699,7 +703,7 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
 </div>
 
 <!-- フィルターバー -->
-<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+<div class="no-print" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
   <div style="font-size:12px;color:#8b8ba0;font-weight:500;margin-right:4px">部門:</div>
   <div id="salesDeptFilter" style="display:flex;gap:4px;flex-wrap:wrap"></div>
 </div>
@@ -1225,6 +1229,8 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
   --yellow-bg: #fdf6e3;
   --border: #e5ddd2;
   --border-light: #f0ebe4;
+  --bg-secondary: #ede8e2;
+  --red-light: #fdeaea;
   --shadow: 0 1px 3px rgba(44,36,24,0.06);
   --shadow-lg: 0 4px 16px rgba(44,36,24,0.1);
   --radius: 8px;
@@ -1358,6 +1364,7 @@ html{font-size:14px;-webkit-text-size-adjust:100%;overflow-x:hidden}
 .btn-secondary{background:var(--bg);color:var(--text);border:1px solid var(--border)}
 .btn-secondary:hover{background:var(--border-light)}
 .btn-warning{background:#f59e0b;color:#fff}
+.btn-danger{background:var(--red);color:#fff}
 .btn-danger:hover{opacity:.85}
 .btn-success{background:var(--green);color:#fff}
 .btn-success:hover{opacity:.85}
@@ -1861,7 +1868,7 @@ tr:hover{background:var(--bg-input)}
   .mr-memo-section{min-height:30px;padding:6px 8px}
   .mr-bar-bg{height:12px}
   .mr-compare{print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .badge,.mr-bar-fill,.mr-section-title,.bep-indicator,.bep-above,.bep-below{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .badge,.mr-bar-fill,.mr-section-title,.bep-indicator,.bep-above,.bep-below,.text-green,.text-red,.subtotal-row,.total-row{print-color-adjust:exact;-webkit-print-color-adjust:exact}
 }
 </style>
 <link href=&quot;https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+JP:wght@400;500;700&amp;display=swap&quot; rel=&quot;stylesheet&quot;>
@@ -4594,6 +4601,7 @@ function renderMonthlyReport(){
 }
 
 function escHtml(s){return s.replace(/&amp;/g,'&amp;amp;').replace(/</g,'&amp;lt;').replace(/>/g,'&amp;gt;').replace(/\n/g,'<br>')}
+var escH=escHtml;
 
 function exportMonthlyCSV(){
   const month=document.getElementById('monthlyMonth').value;
@@ -7729,7 +7737,7 @@ function refreshOrderPage(){
   document.getElementById('orderFilterMonth').style.display=view==='orders'?'':'none';
   if(view==='orders') renderOrderList();
   if(view==='payment'){const pm=document.getElementById('paymentMonth');if(!pm.value)pm.value=getToday().substring(0,7);renderPaymentList()}
-  if(view==='report') renderMonthlyReport();
+  if(view==='report') renderOrderMonthlyReport();
 }
 
 function renderOrderList(){
@@ -7846,7 +7854,7 @@ function showOrderDetail(id){
   h+='</div><div style=&quot;text-align:right&quot;>発注日: '+o.orderDate+'<br>'+(getStoreConfig().storeName||'あん庵')+'</div></div>';
   h+='<table style=&quot;width:100%;margin-bottom:8px&quot;><thead><tr><th>品名</th><th class=&quot;r&quot;>数量</th><th>単位</th><th class=&quot;r&quot;>単価</th><th class=&quot;r&quot;>金額</th></tr></thead><tbody>';
   o.items.forEach(it=>{h+='<tr><td>'+escH(it.name)+'</td><td class=&quot;r&quot;>'+(it.quantity||0)+'</td><td>'+escH(it.unit||'')+'</td><td class=&quot;r&quot;>'+formatNum(it.unitPrice||0)+'</td><td class=&quot;r&quot;>'+formatNum((it.quantity||0)*(it.unitPrice||0))+'</td></tr>'});
-  h+='<tr style=&quot;font-weight:700;border-top:2px solid var(--text)&quot;><td colspan=&quot;4&quot; style=&quot;text-align:right&quot;>合計</td><td class=&quot;r&quot;>¥'+formatNum(o.total)+'</td></tr></tbody></table>';
+  h+='<tr style=&quot;font-weight:700;border-top:2px solid #333&quot;><td colspan=&quot;4&quot; style=&quot;text-align:right&quot;>合計</td><td class=&quot;r&quot;>¥'+formatNum(o.total)+'</td></tr></tbody></table>';
   if(o.deliveryDate) h+='<div style=&quot;font-size:.82rem;margin-bottom:4px&quot;>📅 納品希望日: '+o.deliveryDate+'</div>';
   if(o.note) h+='<div style=&quot;font-size:.82rem;margin-bottom:4px&quot;>📝 備考: '+escH(o.note)+'</div>';
   h+='</div>';
@@ -7880,7 +7888,7 @@ function renderPaymentList(){
     h+='<tr><td><strong>'+escH(g.name)+'</strong></td><td>'+method+'</td><td class=&quot;r&quot;>'+formatNum(g.total)+'</td><td class=&quot;r&quot; style=&quot;color:#16a34a&quot;>'+formatNum(g.paid)+'</td><td class=&quot;r&quot; style=&quot;color:#e11d48;font-weight:'+(g.unpaid>0?'700':'400')+'&quot;>'+formatNum(g.unpaid)+'</td><td style=&quot;font-size:11px&quot;>'+bank+'</td>';
     h+='<td class=&quot;no-print&quot;>';if(g.unpaid>0) h+='<button class=&quot;btn btn-sm&quot; onclick=&quot;markSupplierPaid('+sid+',\''+month+'\')&quot; style=&quot;font-size:10px;padding:2px 8px;background:#16a34a;color:#fff&quot;>一括支払済</button>';h+='</td></tr>';
   });
-  h+='<tr style=&quot;font-weight:700;border-top:2px solid var(--text)&quot;><td>合計</td><td></td><td class=&quot;r&quot;>'+formatNum(tA)+'</td><td class=&quot;r&quot; style=&quot;color:#16a34a&quot;>'+formatNum(pA)+'</td><td class=&quot;r&quot; style=&quot;color:#e11d48&quot;>'+formatNum(uA)+'</td><td></td><td></td></tr></tbody></table></div>';
+  h+='<tr style=&quot;font-weight:700;border-top:2px solid #333&quot;><td>合計</td><td></td><td class=&quot;r&quot;>'+formatNum(tA)+'</td><td class=&quot;r&quot; style=&quot;color:#16a34a&quot;>'+formatNum(pA)+'</td><td class=&quot;r&quot; style=&quot;color:#e11d48&quot;>'+formatNum(uA)+'</td><td></td><td></td></tr></tbody></table></div>';
   if(!Object.keys(byS).length) h='<div style=&quot;text-align:center;padding:40px;color:var(--text-light)&quot;>この月の発注データはありません</div>';
   document.getElementById('paymentListArea').innerHTML=h;
 }
@@ -7891,7 +7899,7 @@ function markSupplierPaid(supplierId,month){
   saveOrders(arr);renderPaymentList();showToast('支払済に更新');
 }
 
-function renderMonthlyReport(){
+function renderOrderMonthlyReport(){
   const orders=getOrders();const months={};
   orders.forEach(o=>{const m=o.orderDate.substring(0,7);if(!months[m])months[m]={total:0,paid:0,unpaid:0,count:0,byCat:{}};months[m].total+=o.total;months[m].count++;if(o.status==='paid')months[m].paid+=o.total;else months[m].unpaid+=o.total;const sup=getSuppliers().find(s=>s.id===o.supplierId);const cat=sup?sup.category:'その他';months[m].byCat[cat]=(months[m].byCat[cat]||0)+o.total});
   const sorted=Object.keys(months).sort().reverse();
@@ -7913,7 +7921,7 @@ function printPaymentList(){
 // Integration: get month order total for PL/monthly
 function getMonthOrderTotal(ym){return getOrders().filter(o=>o.orderDate.startsWith(ym)&amp;&amp;o.status!=='draft').reduce((s,o)=>s+o.total,0)}
 function suggestFromOrders(){
-  const me=document.getElementById('monthlyTarget');if(!me)return;
+  const me=document.getElementById('monthlyMonth');if(!me)return;
   const ym=me.value;const total=getMonthOrderTotal(ym);
   if(total<=0){showToast('この月の発注データなし','error');return}
   const el=document.getElementById('mExp_purchase');
@@ -7954,7 +7962,8 @@ body { background: #f8fafc !important; min-height: auto !important; }
 /* CRITICAL: Ensure page-section visibility */
 .page-section { display: none !important; }
 .page-section.active { display: block !important; }
-/* Unified card styling */
+/* Unified card styling — screen only to not break print layouts */
+@media screen{
 .card{
   background:#fff!important;border:1px solid #e0e2ec!important;
   border-radius:12px!important;box-shadow:0 1px 3px rgba(0,0,0,0.04)!important;padding:20px!important;
@@ -7962,6 +7971,7 @@ body { background: #f8fafc !important; min-height: auto !important; }
 .btn-primary,.btn{border-radius:8px!important}
 table th{background:#f4f6fa!important;font-size:11px!important;text-transform:uppercase!important;letter-spacing:.05em!important;color:#64748b!important;font-weight:600!important}
 table td{font-size:13px!important;color:var(--nc-text2,#4a4a60)!important}
+}
 </style>
 
 <script>
@@ -8623,15 +8633,15 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
 @media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}
 </style>
 <style id=&quot;nv-profit-fix&quot;>
-body{background:var(--nv-bg)!important;color:var(--nv-text)!important}
+body{background:var(--nc-bg)!important;color:var(--nc-text)!important}
 .panel,.card,.calc-card,.result-card,.summary-card,.section{
-  background:var(--nv-card)!important;color:var(--nv-text)!important;
-  border:1px solid var(--nv-border)!important;border-radius:var(--nv-radius)!important;
-  box-shadow:var(--nv-shadow)!important;
+  background:var(--nc-card)!important;color:var(--nc-text)!important;
+  border:1px solid var(--nc-border)!important;border-radius:var(--nc-radius)!important;
+  box-shadow:var(--nc-shadow)!important;
 }
-h1,h2,h3,.title,.section-title{color:var(--nv-text)!important}
-.label,.meta,.sub,.note{color:var(--nv-text-light)!important}
-input,select{background:var(--nv-card)!important;color:var(--nv-text)!important;border:1px solid var(--nv-border)!important}
+h1,h2,h3,.title,.section-title{color:var(--nc-text)!important}
+.label,.meta,.sub,.note{color:var(--nc-text3)!important}
+input,select{background:var(--nc-card)!important;color:var(--nc-text)!important;border:1px solid var(--nc-border)!important}
 </style></head>
 <body>
 <div id=&quot;app&quot;></div>
@@ -9321,9 +9331,9 @@ function nvPdfSave(title){
     .print-category-summary { margin-bottom: 4px; padding: 3px 5px; border: 1px solid #4d5f3a; background: #f5f7f2 !important; font-size: 7pt !important; }
     .print-category-grid { display: flex; flex-wrap: wrap; gap: 1px 6px; }
     .print-category-item { white-space: nowrap; }
-    .print-
-    .print-table 
-    .print-table 
+    .print-table { width: 100%; border-collapse: collapse; font-size: 7pt !important; }
+    .print-table th { background: #e2e8f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 1px 3px !important; font-size: 7pt !important; font-weight: bold; }
+    .print-table td { padding: 1px 3px !important; font-size: 7pt !important; }
     .print-table tbody tr:nth-child(even) { background: #f0f4f8 !important; }
     .print-table tfoot td { padding: 1px 3px !important; border: 2px solid #6366f1 !important; background: #e0e7ff !important; font-weight: bold; font-size: 7pt !important; }
     .mono { font-family: 'Inter', -apple-system, sans-serif; }
@@ -9903,17 +9913,17 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
 @media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}
 </style>
 <style id=&quot;nv-expense-fix&quot;>
-body{background:var(--nv-bg)!important;color:var(--nv-text)!important}
+body{background:var(--nc-bg)!important;color:var(--nc-text)!important}
 .card,.panel,.section,.summary-card,.category-card,.expense-card{
-  background:var(--nv-card)!important;color:var(--nv-text)!important;
-  border:1px solid var(--nv-border)!important;border-radius:var(--nv-radius)!important;
-  box-shadow:var(--nv-shadow)!important;
+  background:var(--nc-card)!important;color:var(--nc-text)!important;
+  border:1px solid var(--nc-border)!important;border-radius:var(--nc-radius)!important;
+  box-shadow:var(--nc-shadow)!important;
 }
-h1,h2,h3,.title,.section-title{color:var(--nv-text)!important}
-.label,.meta,.sub{color:var(--nv-text-light)!important}
-.header,.top-bar{background:var(--nv-bg)!important;color:var(--nv-text)!important;border-bottom:1px solid var(--nv-border)!important}
-input,select{background:var(--nv-card)!important;color:var(--nv-text)!important;border:1px solid var(--nv-border)!important}
-.mono{font-family:var(--nv-font-num)!important;letter-spacing:-.02em!important}
+h1,h2,h3,.title,.section-title{color:var(--nc-text)!important}
+.label,.meta,.sub{color:var(--nc-text3)!important}
+.header,.top-bar{background:var(--nc-bg)!important;color:var(--nc-text)!important;border-bottom:1px solid var(--nc-border)!important}
+input,select{background:var(--nc-card)!important;color:var(--nc-text)!important;border:1px solid var(--nc-border)!important}
+.mono{font-family:var(--font-num)!important;letter-spacing:-.02em!important}
 </style></head>
 <body class=&quot;min-h-screen bg-navy-50&quot;>
     <div id=&quot;app&quot;></div>
@@ -10055,7 +10065,7 @@ input,select{background:var(--nv-card)!important;color:var(--nv-text)!important;
                 <div class=&quot;print-only print-header&quot;><h1>現金出納帳　${periodLabel}</h1><p>出力日: ${new Date().toLocaleDateString('ja-JP')}${state.filterCategory ? ` ｜ ${state.filterCategory}` : ''} ｜ ${filtered.length}件</p></div>
                 <div class=&quot;print-only print-summary&quot;><div class=&quot;print-summary-grid&quot;><span><b>合計:</b> <span class=&quot;mono&quot;>¥${formatAmount(summary.total)}</span></span><span><b>10%:</b> <span class=&quot;mono&quot;>¥${formatAmount(summary.standard)}</span></span><span><b>8%:</b> <span class=&quot;mono&quot;>¥${formatAmount(summary.reduced)}</span></span><span><b>インボイス有:</b> <span class=&quot;mono&quot;>¥${formatAmount(summary.withInv)}</span></span><span><b>インボイス無:</b> <span class=&quot;mono&quot;>¥${formatAmount(summary.withoutInv)}</span></span></div></div>
                 <div class=&quot;print-only print-category-summary&quot;><b>【カテゴリ別】</b><div class=&quot;print-category-grid&quot;>${sortedCategories.map(([cat, amt]) => `<span class=&quot;print-category-item&quot;>${cat}:<span class=&quot;mono&quot;>¥${formatAmount(amt)}</span></span>`).join('')}</div></div>
-                <div class=&quot;no-print exp-toolbar&quot;><div style=&quot;display:flex;align-items:center;gap:6px&quot;><button onclick=&quot;openForm()&quot; style=&quot;display:inline-flex;align-items:center;gap:6px;padding:7px 16px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer&quot;>＋ 新規<span class=&quot;exp-hide-mob&quot;>登録</span></button><button onclick=&quot;toggleSummary()&quot; style=&quot;display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:transparent;border:1px solid var(--border,#e2e8f0);border-radius:8px;font-size:12px;font-weight:600;color:var(--text,#334155);cursor:pointer&quot;>📊 集計</button></div><div style=&quot;display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end&quot;><button onclick=&quot;handlePrint()&quot; class=&quot;exp-tb-btn&quot;>🖨 印刷</button><button onclick=&quot;handlePrint()&quot; class=&quot;exp-tb-btn&quot;>📄 PDF</button><button onclick=&quot;handleCSVExport()&quot; class=&quot;exp-tb-btn&quot;>📥 CSV</button><div style=&quot;position:relative&quot; class=&quot;group&quot;><button class=&quot;exp-tb-btn&quot;>💾 デ<span class=&quot;exp-hide-mob&quot;>ー</span>タ</button><div class=&quot;hidden group-hover:block&quot; style=&quot;position:absolute;right:0;margin-top:4px;width:160px;background:#fff;border:1px solid #e0e2ec;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:50;overflow:hidden&quot;><button onclick=&quot;handleExport()&quot; style=&quot;display:block;width:100%;padding:8px 12px;font-size:12px;text-align:left;border:none;background:transparent;cursor:pointer&quot;>📤 エクスポート</button><button onclick=&quot;document.getElementById('importInput').click()&quot; style=&quot;display:block;width:100%;padding:8px 12px;font-size:12px;text-align:left;border:none;background:transparent;cursor:pointer&quot;>📥 インポート</button></div></div></div></div>
+                <div class=&quot;no-print exp-toolbar&quot;><div style=&quot;display:flex;align-items:center;gap:6px&quot;><button onclick=&quot;openForm()&quot; style=&quot;display:inline-flex;align-items:center;gap:6px;padding:7px 16px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer&quot;>＋ 新規<span class=&quot;exp-hide-mob&quot;>登録</span></button><button onclick=&quot;toggleSummary()&quot; style=&quot;display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:transparent;border:1px solid var(--border,#e2e8f0);border-radius:8px;font-size:12px;font-weight:600;color:var(--text,#334155);cursor:pointer&quot;>📊 集計</button></div><div style=&quot;display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end&quot;><button onclick=&quot;handlePrint()&quot; class=&quot;exp-tb-btn&quot;>🖨 印刷</button><button onclick=&quot;handlePrint()&quot; class=&quot;exp-tb-btn&quot;>📄 PDF</button><button onclick=&quot;exportCSV()&quot; class=&quot;exp-tb-btn&quot;>📥 CSV</button><div style=&quot;position:relative&quot; class=&quot;group&quot;><button class=&quot;exp-tb-btn&quot;>💾 デ<span class=&quot;exp-hide-mob&quot;>ー</span>タ</button><div class=&quot;hidden group-hover:block&quot; style=&quot;position:absolute;right:0;margin-top:4px;width:160px;background:#fff;border:1px solid #e0e2ec;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:50;overflow:hidden&quot;><button onclick=&quot;exportData()&quot; style=&quot;display:block;width:100%;padding:8px 12px;font-size:12px;text-align:left;border:none;background:transparent;cursor:pointer&quot;>📤 エクスポート</button><button onclick=&quot;document.getElementById('importFile').click()&quot; style=&quot;display:block;width:100%;padding:8px 12px;font-size:12px;text-align:left;border:none;background:transparent;cursor:pointer&quot;>📥 インポート</button></div></div></div></div>
 
 
                 <main class=&quot;max-w-7xl mx-auto px-4 py-6 print-container&quot;>
@@ -10429,6 +10439,14 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
   th,td{padding:6px 6px!important}
 }
 @media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}
+@media print{
+  .header,.no-print,.nv-print-bar,.tabs,.modal-overlay{display:none!important}
+  body{background:#fff;padding:10px;font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th,td{border:1px solid #ccc;padding:4px 6px}
+  th{background:#f0f0f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:A4 landscape;margin:10mm}
+}
 </style>
 </head>
 <body>
@@ -10968,11 +10986,11 @@ function nvPdfSave(title){
     color: #333;
     margin-bottom: 5px;
     }
-    .invoice-
-    .invoice-table th,
-    .invoice-table 
-    .invoice-table 
-    .invoice-table .amount {
+    .invoice-table th {
+    text-align: center;
+    }
+    .invoice-table .amount,
+    .invoice-table td.amount {
     text-align: right;
     }
     .total-section {
@@ -11223,12 +11241,13 @@ function nvPdfSave(title){
     margin-left: 10px;
     }
     @media print {
+    @page { size: A4 portrait; margin: 15mm; }
     body {
     background: white;
     padding: 0;
     margin: 0;
     }
-    .form-panel, .action-buttons, .header {
+    .form-panel, .action-buttons, .header, .modal {
     display: none;
     }
     .preview-panel {
@@ -11784,16 +11803,16 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
 @media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}
 </style>
 <style id=&quot;nv-invoice-fix&quot;>
-body{background:var(--nv-bg)!important;color:var(--nv-text)!important}
+body{background:var(--nc-bg)!important;color:var(--nc-text)!important}
 .panel,.card,.section,.invoice-card{
-  background:var(--nv-card)!important;color:var(--nv-text)!important;
-  border:1px solid var(--nv-border)!important;border-radius:var(--nv-radius)!important;
-  box-shadow:var(--nv-shadow)!important;
+  background:var(--nc-card)!important;color:var(--nc-text)!important;
+  border:1px solid var(--nc-border)!important;border-radius:var(--nc-radius)!important;
+  box-shadow:var(--nc-shadow)!important;
 }
-h1,h2,h3,.title{color:var(--nv-text)!important}
-.btn-primary,.btn-create{background:var(--nv-primary)!important}
+h1,h2,h3,.title{color:var(--nc-text)!important}
+.btn-primary,.btn-create{background:var(--nc-primary)!important}
 .btn-primary:hover,.btn-create:hover{background:#4338ca!important}
-input,select,textarea{background:var(--nv-card)!important;color:var(--nv-text)!important;border:1px solid var(--nv-border)!important}
+input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!important;border:1px solid var(--nc-border)!important}
 </style></head>
 <body>
     <div class=&quot;container&quot;>
@@ -13354,33 +13373,9 @@ function nvInvoicePrint(){
     #bulk-print-container * {
     color: inherit !important;
     }
-    @page { 
-    size: A4 landscape;
-    margin: 8mm 10mm;
-    }
-    #tab-employees:not(.hidden) {
     @page {
     size: A4 portrait;
     margin: 10mm 15mm;
-    }
-    }
-    #tab-assessment:not(.hidden) {
-    @page {
-    size: A4 landscape;
-    margin: 10mm 15mm;
-    }
-    }
-    #payslip-modal.active, #bonus-slip-modal.active {
-    @page {
-    size: A4 portrait;
-    margin: 15mm;
-    }
-    }
-    body:has(#bulk-print-container[style*=&quot;display: block&quot;]) {
-    @page {
-    size: A4 portrait;
-    margin: 15mm;
-    }
     }
     #payroll-table { 
     font-size: 8px !important;
@@ -13707,16 +13702,16 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
 @media(max-width:480px){.kpi-grid{grid-template-columns:1fr!important}}
 </style>
 <style id=&quot;nv-payroll-fix&quot;>
-body{background:var(--nv-bg)!important;color:var(--nv-text)!important}
+body{background:var(--nc-bg)!important;color:var(--nc-text)!important}
 .card,.panel,.section{
-  background:var(--nv-card)!important;color:var(--nv-text)!important;
-  border:1px solid var(--nv-border)!important;border-radius:var(--nv-radius)!important;
-  box-shadow:var(--nv-shadow)!important;
+  background:var(--nc-card)!important;color:var(--nc-text)!important;
+  border:1px solid var(--nc-border)!important;border-radius:var(--nc-radius)!important;
+  box-shadow:var(--nc-shadow)!important;
 }
-h1,h2,h3,.title{color:var(--nv-text)!important}
-.btn-primary{background:var(--nv-primary)!important}
+h1,h2,h3,.title{color:var(--nc-text)!important}
+.btn-primary{background:var(--nc-primary)!important}
 .btn-primary:hover{background:#4338ca!important}
-input,select,textarea{background:var(--nv-card)!important;color:var(--nv-text)!important;border:1px solid var(--nv-border)!important}
+input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!important;border:1px solid var(--nc-border)!important}
 </style></head>
 <body>
     <div class=&quot;header&quot;>
@@ -15055,10 +15050,6 @@ input,select,textarea{background:var(--nv-card)!important;color:var(--nv-text)!i
             document.getElementById('emp-type').value = emp.type;
             document.getElementById('emp-dependents').value = emp.dependents;
             document.getElementById('emp-prefecture').value = emp.prefecture || 'tokyo';
-            document.getElementById('emp-health-check').checked = emp.healthCheck;
-            document.getElementById('emp-pension-check').checked = emp.pensionCheck;
-            document.getElementById('emp-care-check').checked = emp.careCheck;
-            document.getElementById('emp-employment-check').checked = emp.employmentCheck;
             document.getElementById('emp-health-amount').value = emp.healthAmount;
             document.getElementById('emp-pension-amount').value = emp.pensionAmount;
             document.getElementById('emp-care-amount').value = emp.careAmount;
@@ -15070,7 +15061,15 @@ input,select,textarea{background:var(--nv-card)!important;color:var(--nv-text)!i
                 document.getElementById('emp-base-hours').value = emp.baseHours;
                 document.getElementById('emp-resident-tax-h').value = emp.residentTax;
             }
+            // Show/hide salary sections based on type (but don't reset insurance)
             handleEmploymentTypeChange();
+            // Restore actual employee insurance values AFTER type change reset
+            document.getElementById('emp-health-check').checked = emp.healthCheck;
+            document.getElementById('emp-pension-check').checked = emp.pensionCheck;
+            document.getElementById('emp-care-check').checked = emp.careCheck;
+            document.getElementById('emp-employment-check').checked = emp.employmentCheck;
+            // Scroll form into view
+            document.getElementById('employee-form').scrollIntoView({behavior:'smooth',block:'start'});
         }
 
         function deleteEmployee(id) {
@@ -17197,12 +17196,6 @@ function completeLogin(){
   document.getElementById('userAvatar').textContent=currentUser.name.charAt(0);
   document.getElementById('userName').textContent=currentUser.name+'（'+currentUser.role+'）';
   applyPermissions();
-  // ログイン後、pullAll完了済みの場合のみforcePush（空データ上書き防止）
-  setTimeout(function(){
-    if(typeof novaSync!=='undefined' && novaSync.ready && novaSync._pullDone){
-      novaSync.forcePushAll();
-    }
-  }, 3000);
   // Check if password change required
   if(currentUser.mustChangePass){
     var modal=document.getElementById('umPwModal');
@@ -19364,16 +19357,8 @@ window.addEventListener('storage',function(e){
   }
 });
 
-// Clear all demo data (v15b = clean start)
-if(localStorage.getItem('nova_version')!=='v15b'){
-  localStorage.removeItem('nova_sales');
-  localStorage.removeItem('nova_posts');
-  localStorage.removeItem('nova_events');
-  localStorage.removeItem('nova_tasks');
-  localStorage.removeItem('nova_docs');
-  localStorage.removeItem('nova_scan_history');
-  localStorage.setItem('nova_version','v15b');
-}
+// Version marker (data clearing removed — new devices pull from Firebase)
+localStorage.setItem('nova_version','v15b');
 // Demo data disabled - real data only
 // salesInitDemoData();
 // homeInitDemo();
@@ -19402,6 +19387,8 @@ var novaSync = {
   syncing: {},
   ready: false,
   _pendingPush: {},
+  _listening: false,
+  MERGE_KEYS: ['nova_events','nova_tasks','nova_posts','nova_sales','nova_members','nova_docs'],
   KEYS: {
     'nova_sales':'nova_sales',
     'nova_docs':'nova_docs',
@@ -19450,13 +19437,13 @@ var novaSync = {
           console.log('[NovaSync] Connected');
           self.ready = true;
           self.pullAll();
-          self.listenAll();
+          if(!self._listening){ self.listenAll(); self._listening=true; }
           self._flushPending();
-          var dot = document.querySelector('.sync-badge');
+          var dot = document.querySelector('.bdg-sync');
           if(dot) dot.textContent = '● 同期中';
         } else {
           self.ready = false;
-          var dot = document.querySelector('.sync-badge');
+          var dot = document.querySelector('.bdg-sync');
           if(dot) dot.textContent = '○ オフライン';
         }
       });
@@ -19481,9 +19468,40 @@ var novaSync = {
     }
     delete this._pendingPush[lsKey];
     var val = localStorage.getItem(lsKey);
-    this.db.ref('novacore/'+fbKey).set(val).catch(function(e){
-      console.warn('[NovaSync] Push failed for '+lsKey+':', e);
-    });
+    var self = this;
+    // Array keys: merge with Firebase to avoid overwriting other devices' data
+    if(this.MERGE_KEYS.indexOf(lsKey) !== -1){
+      this.db.ref('novacore/'+fbKey).once('value', function(snap){
+        var remoteVal = snap.val();
+        var merged = self._mergeArrays(val, remoteVal);
+        // Update local if merge added remote-only records
+        if(merged !== val){
+          self.syncing[lsKey] = true;
+          localStorage.setItem(lsKey, merged);
+          self.syncing[lsKey] = false;
+        }
+        self.db.ref('novacore/'+fbKey).set(merged).catch(function(e){
+          console.warn('[NovaSync] Push failed for '+lsKey+':', e);
+        });
+      });
+    } else {
+      this.db.ref('novacore/'+fbKey).set(val).catch(function(e){
+        console.warn('[NovaSync] Push failed for '+lsKey+':', e);
+      });
+    }
+  },
+  _mergeArrays: function(localStr, remoteStr){
+    try {
+      var local = JSON.parse(localStr || '[]');
+      var remote = JSON.parse(remoteStr || '[]');
+      if(!Array.isArray(local) || !Array.isArray(remote)) return localStr || '[]';
+      var map = {};
+      remote.forEach(function(r){ if(r && r.id) map[r.id] = r; });
+      local.forEach(function(l){ if(l && l.id) map[l.id] = l; }); // local wins
+      return JSON.stringify(Object.values(map));
+    } catch(e) {
+      return localStr || '[]';
+    }
   },
   _flushPending: function(){
     var keys=Object.keys(this._pendingPush);
@@ -19598,6 +19616,19 @@ var novaSync = {
   }
 };
 
+// Manual sync: pull latest from Firebase + re-render
+function novaSyncManual(){
+  if(!novaSync.ready || !novaSync.db){
+    showHomeToast('オフラインです — 接続後に再試行してください','error');
+    return;
+  }
+  showHomeToast('同期中...','info');
+  novaSync.pullAll();
+  // pullAll is async; show success after a short delay
+  setTimeout(function(){
+    showHomeToast('同期完了','success');
+  }, 1500);
+}
 
 // Firebase同期を先に初期化し、データが来てからログイン画面を表示
 try{novaSync.init();}catch(e){console.warn("[NovaSync] startup error:",e);}
@@ -19618,10 +19649,7 @@ if(novaSync.ready){
   // 最大3秒待ってタイムアウト
   setTimeout(function(){if(!_loginReady)_tryLogin();},3000);
 }
-// forcePushAllはpullAll完了後のみ実行（空データで上書き防止）
-setTimeout(function(){
-  if(typeof novaSync!=='undefined'&&novaSync.ready&&novaSync._pullDone) novaSync.forcePushAll();
-},8000);
+// forcePushAll auto-execution removed — manual sync only
 
 
 /* ===== 領収書自動仕分けツール ===== */
