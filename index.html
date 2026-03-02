@@ -404,12 +404,13 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
 <button class="ni pay-sub hide" onclick="goPay('data-management')" style="padding-left:24px;font-size:11px"><span class="ic" style="font-size:12px">💾</span>データ管理</button>
 <button class="ni" onclick="go('documents')"><span class="ic">▤</span>書類管理</button>
 <button class="ni" onclick="go('tax_report')"><span class="ic">▧</span>税理士レポート</button>
-<div class="sb-grp">各種ツール</div>
+<div class="sb-grp">日常業務</div>
 <button class="ni" onclick="go('sales_tracker')"><span class="ic">◫</span>売上入力</button>
 <button class="ni" onclick="go('profit')" style="padding-left:24px;font-size:11px"><span class="ic" style="font-size:12px">┗</span>競艇計算</button>
-<button class="ni" onclick="go('doc_scan')"><span class="ic">⊞</span>自動書類スキャン</button>
-<button class="ni" onclick="go('invoices')"><span class="ic">▢</span>請求書・領収書</button>
-<button class="ni" onclick="go('receipt_sort')"><span class="ic">🧾</span>領収書仕分け</button>
+<button class="ni" onclick="go('invoices')"><span class="ic">▢</span>請求・領収書作成</button>
+<div class="sb-grp">AI自動ツール</div>
+<button class="ni" onclick="go('doc_scan')"><span class="ic">⊞</span>自動書類仕分</button>
+<button class="ni" onclick="go('receipt_sort')"><span class="ic">🧾</span>領収書自動仕分</button>
 <div class="sb-grp">飲食部門</div>
 <button class="ni" onclick="toggleAnc()" id="ancParent"><span class="ic">◉</span>あん庵管理<span id="ancChev" style="margin-left:auto;font-size:9px;opacity:.5;transition:transform .2s">▶</span></button>
 <button class="ni anc-sub hide" onclick="goAnc('dashboard')" style="padding-left:24px;font-size:11px"><span class="ic" style="font-size:12px">📊</span>ダッシュボード</button>
@@ -10457,9 +10458,9 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
     <button class=&quot;btn&quot; onclick=&quot;stChangeMonth(1)&quot; style=&quot;padding:4px 10px;font-size:14px&quot;>▶</button>
   </div>
   <div style=&quot;display:flex;gap:8px;align-items:center&quot;>
-    <div class=&quot;nv-print-bar no-print&quot;>
-      <button onclick=&quot;nvPrint()&quot; title=&quot;印刷&quot;>🖨️ 印刷</button>
-      <button class=&quot;nv-pdf-btn&quot; onclick=&quot;nvPdfSave('売上入力_'+document.getElementById('selMonth').value)&quot; title=&quot;PDF保存&quot;>📄 PDF</button>
+    <div class=&quot;nv-print-bar no-print&quot; style=&quot;display:flex;gap:6px&quot;>
+      <button class=&quot;btn btn-sec btn-sm&quot; onclick=&quot;nvPrint()&quot; title=&quot;印刷&quot;>🖨️ 印刷</button>
+      <button class=&quot;btn btn-red btn-sm&quot; onclick=&quot;nvPdfSave('売上入力_'+document.getElementById('selMonth').value)&quot; title=&quot;PDF保存&quot;>📄 PDF</button>
     </div>
     <button class=&quot;btn btn-pri&quot; onclick=&quot;openDailyModal()&quot;>＋ 売上入力</button>
   </div>
@@ -16401,9 +16402,9 @@ function nvPdfSave(title){
 const T={
   dashboard:'ホーム',sales:'売上管理',expenses:'現金出納帳',
   payroll:'給与計算',documents:'書類管理',tax_report:'税理士レポート',
-  profit:'競艇計算',doc_scan:'自動書類スキャン',
-  invoices:'請求書・領収書',sales_tracker:'売上入力',
-  receipt_sort:'領収書仕分け',
+  profit:'競艇計算',doc_scan:'自動書類仕分',
+  invoices:'請求・領収書作成',sales_tracker:'売上入力',
+  receipt_sort:'領収書自動仕分',
   ancore:'あん庵管理',ai:'AIアシスタント',user_mgmt:'ユーザー管理'
 };
 const P=['dashboard','sales','expenses','payroll','documents','tax_report',
