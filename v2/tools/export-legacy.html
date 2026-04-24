@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOVA Core — レガシーデータエクスポータ</title>
+<style>
+  :root {
+    --primary: #6366f1;
+    --danger: #ef4444;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --bg: #f4f6fa;
+    --surface: #ffffff;
+    --border: #e0e2ec;
+    --text: #0f0f1a;
+    --text-2: #4a4a60;
+    --text-3: #8b8ba0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Sora', 'Noto Sans JP', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px;
+    line-height: 1.7;
+    font-size: 14px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 24px; margin-bottom: 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--text-3); font-size: 13px; margin-bottom: 28px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .card h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .note {
+    background: #fffbeb;
+    border: 1px solid #fef3c7;
+    color: #92400e;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .danger {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  button {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all .2s;
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
+  button:hover { background: #5558e6; transform: translateY(-1px); }
+  button.secondary { background: #64748b; }
+  button.secondary:hover { background: #475569; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  th {
+    color: var(--text-3);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #f8fafc;
+  }
+  td.num { text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .pill-core    { background: #eef2ff; color: var(--primary); }
+  .pill-ancore  { background: #ecfdf5; color: #059669; }
+  .pill-boat    { background: #fef3c7; color: #92400e; }
+  .pill-legacy  { background: #f3f4f6; color: #6b7280; }
+  .pill-drop    { background: #fee2e2; color: #991b1b; }
+  .pill-secret  { background: #fce7f3; color: #be185d; }
+  pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 12px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 13px;
+  }
+  .stat:last-child { border: none; }
+  .stat .k { color: var(--text-3); }
+  .stat .v { font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<h1>🗂 NOVA Core — レガシーデータエクスポータ</h1>
+<div class="sub">
+  旧 <code>index.html</code> と <strong>同一オリジン</strong> でこのページを開くと、
+  localStorage の全データを 3 ファイルに分類して書き出します。
+</div>
+
+<div class="card">
+  <h2>📋 現在のデータ</h2>
+  <div id="scanResult">
+    <button onclick="scan()">🔍 localStorage をスキャン</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>⬇ エクスポート</h2>
+  <div class="note">
+    <strong>出力ファイル:</strong>
+    <code>novacore-main.json</code> (コア業務データ) /
+    <code>ancore.json</code> (あん庵) /
+    <code>boat.json</code> (競艇) /
+    <code>novacore-other.json</code> (その他)
+  </div>
+  <div class="danger">
+    <strong>⚠ 機密扱い:</strong>
+    <code>rcpt_api_key</code>（Claude APIキー）は<strong>絶対に出力されません</strong>。
+    新版へ移行する際は新しい端末で再入力してください。
+  </div>
+  <button onclick="exportAll()">📦 全データをエクスポート（4ファイル同時）</button>
+  <button class="secondary" onclick="exportSingle()">📄 1ファイルで全ダンプ</button>
+</div>
+
+<div class="card">
+  <h2>🧪 デバッグ出力</h2>
+  <pre id="debug">スキャンを実行してください</pre>
+</div>
+
+</div>
+
+<script>
+// ---- Classification rules ----
+// Keys are classified into buckets by prefix or explicit membership.
+const CORE_KEYS = new Set([
+  // 売上管理（入力＋管理統合）
+  'nova_sales',
+  'nova_st3_cats', 'nova_st3_daily', 'nova_st3_costs',
+  // 現金出納帳 + 領収書仕分
+  'expense-tracker-data-v2',
+  'rcpt_history', 'rcpt_accounts', 'rcpt_depts', 'rcpt_threshold',
+  // 請求・領収書作成
+  'invoice_history', 'client_master', 'bank_master',
+  // 書類管理
+  'nova_docs',
+  // 給与計算
+  'payroll_v2_employees', 'payroll_v2_records', 'payroll_v2_bonus',
+  'payroll_v2_rates', 'payroll_v2_health_rates', 'payroll_v2_bank_accounts',
+  // ユーザー・メンバー（パスワードは後でPBKDF2再ハッシュ予定）
+  'nova_members', 'nova_currentUser',
+  // ホーム機能は簡素化するが、過去データは念のため保全
+  'nova_posts', 'nova_tasks', 'nova_events', 'nova_events_seen_count',
+  // スキャン履歴（廃止予定だが保存しておく）
+  'nova_scan_history',
+  // バージョンマーカー
+  'nova_version',
+]);
+
+const SECRET_KEYS = new Set([
+  'rcpt_api_key',  // APIキーは絶対にエクスポートしない
+]);
+
+function classify(key) {
+  if (SECRET_KEYS.has(key))          return 'secret';
+  if (key.startsWith('annan_'))      return 'ancore';
+  if (key.startsWith('boatrace-'))   return 'boat';
+  if (key.startsWith('nova_honbu_')) return 'legacy';  // あん庵本部送信受信データ
+  if (CORE_KEYS.has(key))            return 'core';
+  if (key.startsWith('payroll_'))    return 'core';
+  if (key.startsWith('rcpt_'))       return 'core';
+  if (key.startsWith('nova_'))       return 'core';
+  return 'other';
+}
+
+function bucketLabel(b) {
+  return {
+    core:   'コア（新版へ移行）',
+    ancore: 'あん庵（別アプリ化）',
+    boat:   '競艇（別アプリ化）',
+    legacy: 'レガシー（参照のみ）',
+    secret: '🔒 機密（エクスポート除外）',
+    other:  'その他',
+  }[b] || b;
+}
+
+function parseValue(str) {
+  try { return JSON.parse(str); }
+  catch { return str; }
+}
+
+function sizeOf(str) {
+  if (str == null) return 0;
+  return new Blob([str]).size;
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+function scan() {
+  const rows = [];
+  const buckets = { core: {}, ancore: {}, boat: {}, legacy: {}, secret: {}, other: {} };
+  let totalBytes = 0;
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const val = localStorage.getItem(key);
+    const bucket = classify(key);
+    const bytes = sizeOf(val);
+    totalBytes += bytes;
+    rows.push({ key, bucket, bytes });
+    buckets[bucket][key] = parseValue(val);
+  }
+
+  rows.sort((a, b) => b.bytes - a.bytes);
+
+  const html = `
+    <div style="margin-bottom: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px">
+      <div class="stat"><span class="k">キー総数</span><span class="v">${rows.length}</span></div>
+      <div class="stat"><span class="k">合計サイズ</span><span class="v">${formatSize(totalBytes)}</span></div>
+      <div class="stat"><span class="k">LS上限</span><span class="v">~5 MB</span></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>キー</th>
+          <th>分類</th>
+          <th>レコード数</th>
+          <th style="text-align:right">サイズ</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const parsed = buckets[r.bucket][r.key];
+          let recordCount = '-';
+          if (Array.isArray(parsed)) recordCount = parsed.length + ' 件';
+          else if (parsed && typeof parsed === 'object') recordCount = Object.keys(parsed).length + ' 項目';
+          return `
+            <tr>
+              <td style="font-family:'JetBrains Mono', monospace; font-size:12px">${r.key}</td>
+              <td><span class="pill pill-${r.bucket}">${bucketLabel(r.bucket)}</span></td>
+              <td>${recordCount}</td>
+              <td class="num">${formatSize(r.bytes)}</td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  document.getElementById('scanResult').innerHTML = html;
+
+  // Stash for export
+  window._buckets = buckets;
+  window._scanned = true;
+
+  // Debug output
+  const debug = {
+    totalKeys: rows.length,
+    totalSize: formatSize(totalBytes),
+    buckets: Object.fromEntries(
+      Object.entries(buckets).map(([k, v]) => [k, Object.keys(v).length + ' keys'])
+    )
+  };
+  document.getElementById('debug').textContent = JSON.stringify(debug, null, 2);
+}
+
+function download(filename, payload) {
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 0);
+}
+
+function exportAll() {
+  if (!window._scanned) scan();
+  const ts = new Date().toISOString().slice(0, 10);
+  const b = window._buckets;
+
+  // Core = main data going to v2
+  if (Object.keys(b.core).length) {
+    download(`novacore-main-${ts}.json`, {
+      exportedAt: new Date().toISOString(),
+      version: 'v1-legacy',
+      bucket: 'core',
+      purpose: 'v2 へ移行するコア業務データ',
+      data: b.core,
+    });
+  }
+
+  // AnCore (separate app)
+  if (Object.keys(b.ancore).length || Object.keys(b.legacy).length) {
+    download(`ancore-${ts}.json`, {
+      exportedAt: new Date().toISOString(),
+      version: 'v1-legacy',
+      bucket: 'ancore',
+      purpose: 'あん庵管理（別アプリ化用）',
+      data: b.ancore,
+      honbuReceived: b.legacy,  // 本部送信の受信データ
+    });
+  }
+
+  // Boat (separate app)
+  if (Object.keys(b.boat).length) {
+    download(`boat-${ts}.json`, {
+      exportedAt: new Date().toISOString(),
+      version: 'v1-legacy',
+      bucket: 'boat',
+      purpose: '競艇計算（別アプリ化用）',
+      data: b.boat,
+    });
+  }
+
+  // Other (unclassified)
+  if (Object.keys(b.other).length) {
+    download(`novacore-other-${ts}.json`, {
+      exportedAt: new Date().toISOString(),
+      version: 'v1-legacy',
+      bucket: 'other',
+      purpose: '未分類キー（要確認）',
+      data: b.other,
+    });
+  }
+
+  alert('エクスポート完了。ダウンロードフォルダを確認してください。');
+}
+
+function exportSingle() {
+  if (!window._scanned) scan();
+  const ts = new Date().toISOString().slice(0, 10);
+  const b = window._buckets;
+  download(`novacore-full-backup-${ts}.json`, {
+    exportedAt: new Date().toISOString(),
+    version: 'v1-legacy',
+    bucket: 'all',
+    purpose: '全データ一括バックアップ（機密キーを除く）',
+    core:    b.core,
+    ancore:  b.ancore,
+    boat:    b.boat,
+    legacy:  b.legacy,
+    other:   b.other,
+    // secret は意図的に含めない
+  });
+  alert('完了。ダウンロードフォルダを確認してください。');
+}
+
+// Auto-scan on load
+window.addEventListener('DOMContentLoaded', scan);
+</script>
+
+</body>
+</html>

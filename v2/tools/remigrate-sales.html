@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>NOVA Core v2 — 売上データ再マイグレーション</title>
+<style>
+  body { font-family: 'Sora', 'Noto Sans JP', sans-serif; background:#f4f6fa; padding:32px; color:#0f0f1a; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size:22px; margin-bottom:12px; }
+  h3 { font-size:14px; margin-bottom:10px; font-weight:700; }
+  .card { background:#fff; border:1px solid #e0e2ec; border-radius:12px; padding:20px; margin-bottom:16px; }
+  button { background:#6366f1; color:#fff; border:none; border-radius:10px; padding:12px 22px; font-size:14px; font-weight:600; cursor:pointer; margin-right:8px; font-family:inherit; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.danger { background:#ef4444; }
+  input[type=text] { padding:10px 12px; border:1px solid #cbd5e0; border-radius:8px; font-size:14px; font-family:inherit; margin-right:8px; min-width:220px; }
+  .log { background:#0c0c14; color:#9ca3af; font-family:'JetBrains Mono', ui-monospace, monospace; font-size:12px; padding:14px; border-radius:10px; white-space:pre-wrap; max-height:420px; overflow-y:auto; margin-top:14px; }
+  .log > div { padding:1px 0; }
+  .ok { color:#10b981; }
+  .err { color:#ef4444; }
+  .warn { color:#f59e0b; }
+  .info { color:#60a5fa; }
+  .note { background:#fef3c7; border:1px solid #fcd34d; border-radius:8px; padding:10px 14px; font-size:13px; margin:12px 0; color:#92400e; }
+  .muted { color:#64748b; font-size:12px; margin-top:6px; }
+  code { background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔄 売上データ再マイグレーション</h1>
+  <div class="note">
+    このツールは <code>salesEntries</code> / <code>salesCategories</code> / <code>salesCosts</code> を全削除したうえで、
+    <code>v1-snapshot-latest.json</code> から再インポートします。
+    <code>_deleted</code> フラグ付きレコードは除外されます。
+  </div>
+
+  <div class="card">
+    <h3>1. スナップショット読み込み</h3>
+    <input type="file" id="file-input" accept="application/json">
+    <button id="btn-load">📥 デフォルトの v1-snapshot-latest.json を読み込む</button>
+    <div class="muted" id="load-info">読み込み前</div>
+  </div>
+
+  <div class="card">
+    <h3>2. 既存 Firestore データをクリア</h3>
+    <p class="muted" style="margin-bottom:10px;">
+      削除対象コレクション: <code>salesEntries</code>, <code>salesCategories</code>, <code>salesCosts</code><br>
+      安全のため、まず下のフィールドに <code>DELETE</code> と入力して「🗑 クリア実行」を押してください。
+    </p>
+    <input type="text" id="confirm-input" placeholder="DELETE と入力" autocomplete="off">
+    <button id="btn-clear" class="danger" disabled>🗑 クリア実行</button>
+    <div class="muted" id="clear-info"></div>
+  </div>
+
+  <div class="card">
+    <h3>3. 再インポート</h3>
+    <button id="btn-import" disabled>▶ インポート実行</button>
+    <div class="muted" id="import-info"></div>
+  </div>
+
+  <div class="card">
+    <h3>4. 検証（snapshot 側の正解値と突き合わせ）</h3>
+    <button id="btn-verify" disabled>✓ 月次集計を検証</button>
+    <div class="muted" id="verify-info"></div>
+  </div>
+
+  <div class="log" id="log"></div>
+</div>
+
+<script type="module">
+// Cache-bust local modules so code edits are picked up without a server restart.
+// (Firebase CDN modules are pinned by URL and should not be cache-busted.)
+const cb = '?v=' + Date.now();
+const { runImport } = await import('../importer.js' + cb);
+const { repos }     = await import('../store.js' + cb);
+const { db }        = await import('../firebase.js' + cb);
+const { collection, getDocs, writeBatch, doc } =
+  await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+
+const SALES_COLLECTIONS = ['salesEntries', 'salesCategories', 'salesCosts'];
+const LOG_CAP = 2000;
+
+// ---- Logging --------------------------------------------------------------
+
+const logEl = document.getElementById('log');
+function log(msg, cls = '') {
+  const t = new Date().toLocaleTimeString('ja-JP');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `[${t}] ${msg}`;
+  logEl.appendChild(line);
+  while (logEl.childElementCount > LOG_CAP) logEl.firstChild.remove();
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---- State ----------------------------------------------------------------
+
+let snapshot = null;
+
+// ---- Snapshot loading ------------------------------------------------------
+
+async function loadDefaultSnapshot() {
+  log('v1-snapshot-latest.json をフェッチ中…', 'info');
+  const r = await fetch('./v1-snapshot-latest.json');
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function loadFromFile(file) {
+  log(`ファイル読み込み中: ${file.name} (${file.size.toLocaleString()} bytes)`, 'info');
+  const text = await file.text();
+  return JSON.parse(text);
+}
+
+function summarizeSnapshot(snap) {
+  const data = snap?.data || snap || {};
+  const counts = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (Array.isArray(v)) counts[k] = v.length;
+    else if (v === null) counts[k] = 'null';
+    else if (typeof v === 'object') counts[k] = 'object';
+    else counts[k] = typeof v;
+  }
+  return { keyCount: Object.keys(data).length, counts, exportedAt: snap?.exportedAt || 'n/a' };
+}
+
+async function onLoadSnapshot(source) {
+  try {
+    const snap = source instanceof File
+      ? await loadFromFile(source)
+      : await loadDefaultSnapshot();
+    const info = summarizeSnapshot(snap);
+    snapshot = snap;
+    document.getElementById('load-info').textContent =
+      `読み込み完了: ${info.keyCount}キー, exportedAt=${info.exportedAt}`;
+    log('読み込み完了: ' + JSON.stringify(info.counts), 'ok');
+    document.getElementById('btn-clear').disabled = !confirmPhraseValid();
+  } catch (e) {
+    log('読み込み失敗: ' + e.message, 'err');
+  }
+}
+
+document.getElementById('btn-load')
+  .addEventListener('click', () => onLoadSnapshot(null));
+document.getElementById('file-input')
+  .addEventListener('change', (ev) => {
+    const file = ev.target.files?.[0];
+    if (file) onLoadSnapshot(file);
+  });
+
+// ---- Two-step confirm for clear -------------------------------------------
+
+const CONFIRM_PHRASE = 'DELETE';
+function confirmPhraseValid() {
+  const v = document.getElementById('confirm-input').value.trim();
+  return snapshot !== null && v === CONFIRM_PHRASE;
+}
+document.getElementById('confirm-input')
+  .addEventListener('input', () => {
+    document.getElementById('btn-clear').disabled = !confirmPhraseValid();
+  });
+
+// ---- Clear (idempotent) ---------------------------------------------------
+
+async function getCount(name) {
+  const snap = await getDocs(collection(db, name));
+  return snap.size;
+}
+
+async function clearCollection(name, maxIterations = 8) {
+  let deleted = 0;
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const snap = await getDocs(collection(db, name));
+    if (snap.empty) break;
+    log(`  ${name}: iter ${iter + 1}, ${snap.size}件 を削除中…`);
+    const docs = snap.docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const batch = writeBatch(db);
+      const chunk = docs.slice(i, i + 400);
+      for (const d of chunk) batch.delete(doc(db, name, d.id));
+      await batch.commit();
+      deleted += chunk.length;
+    }
+  }
+  // Final verification
+  const remaining = await getCount(name);
+  if (remaining > 0) {
+    throw new Error(`${name}: ${remaining}件が残存（maxIterations到達）`);
+  }
+  return deleted;
+}
+
+document.getElementById('btn-clear').addEventListener('click', async () => {
+  if (!confirmPhraseValid()) {
+    log('確認フレーズが一致しません', 'warn');
+    return;
+  }
+  const counts = {};
+  for (const name of SALES_COLLECTIONS) counts[name] = await getCount(name);
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  log(`== Firestore クリア開始 (合計 ${total} 件) ==`);
+  log(`  事前件数: ${JSON.stringify(counts)}`, 'info');
+
+  document.getElementById('btn-clear').disabled = true;
+  document.getElementById('confirm-input').value = '';
+
+  try {
+    const results = {};
+    for (const name of SALES_COLLECTIONS) {
+      results[name] = await clearCollection(name);
+      log(`  ${name}: ${results[name]}件 削除完了`, 'ok');
+    }
+    document.getElementById('clear-info').textContent =
+      'クリア完了: ' + Object.entries(results).map(([k, v]) => `${k}=${v}`).join(', ');
+    document.getElementById('btn-import').disabled = false;
+  } catch (e) {
+    log('クリア失敗: ' + e.message, 'err');
+  }
+});
+
+// ---- Import ---------------------------------------------------------------
+
+document.getElementById('btn-import').addEventListener('click', async () => {
+  if (!snapshot) { log('スナップショット未読み込み', 'err'); return; }
+  document.getElementById('btn-import').disabled = true;
+
+  try {
+    log('== インポート開始 (merge=false, 完全置き換え) ==');
+    const res = await runImport(snapshot, (p) => {
+      if (p.phase === 'write') {
+        log(`  [${p.current}/${p.total}] ${p.label}`);
+      } else if (p.phase === 'skip') {
+        log(`  skip: ${p.label}`, 'warn');
+      } else if (p.phase === 'error') {
+        log(`  ERROR [${p.key}]: ${p.error}`, 'err');
+      }
+    }, { merge: false });
+
+    const summary =
+      `imported=${res.imported}, skipped=${res.skipped}, failed=${res.failed}`;
+    log('インポート完了: ' + summary, 'ok');
+    if (res.errors.length) {
+      log(`エラー詳細 ${res.errors.length} 件:`, 'warn');
+      res.errors.slice(0, 20).forEach(err =>
+        log(`  ! ${err.key}: ${err.reason}`, 'err'));
+      if (res.errors.length > 20) log(`  … (${res.errors.length - 20} 件省略)`, 'warn');
+    }
+    document.getElementById('import-info').textContent = summary;
+    document.getElementById('btn-verify').disabled = false;
+  } catch (e) {
+    log('インポート失敗: ' + e.message, 'err');
+    document.getElementById('btn-import').disabled = false;
+  }
+});
+
+// ---- Verify (target derived from snapshot) ---------------------------------
+
+/**
+ * Compute the expected monthly totals directly from the snapshot,
+ * applying the same `_deleted` filter that v1 uses at display time.
+ * This gives us a ground-truth target without hardcoding month values.
+ */
+function computeExpectedTotals(snap) {
+  const data = snap?.data || snap || {};
+  const daily = Array.isArray(data.nova_st3_daily) ? data.nova_st3_daily : [];
+  const target = {};
+  for (const d of daily) {
+    if (!d || d._deleted || d.deleted) continue;
+    const m = typeof d.date === 'string' && /^(\d{4})-(\d{2})/.exec(d.date);
+    if (!m) continue;
+    const mk = m[0];
+    target[mk] = (target[mk] || 0) + (Number(d.amount) || 0);
+  }
+  return target;
+}
+
+async function actualMonthlyTotals() {
+  const entries = await repos.salesEntries.list();
+  const byMonth = {};
+  let badDate = 0;
+  for (const e of entries) {
+    const m = typeof e.date === 'string' && /^(\d{4})-(\d{2})/.exec(e.date);
+    if (!m) { badDate++; continue; }
+    const mk = m[0];
+    byMonth[mk] = (byMonth[mk] || 0) + (Number(e.amount) || 0);
+  }
+  return { byMonth, badDate };
+}
+
+document.getElementById('btn-verify').addEventListener('click', async () => {
+  try {
+    if (!snapshot) { log('スナップショット未読み込み', 'err'); return; }
+    log('== 検証: 月次集計（snapshot 正解値と突き合わせ）==');
+
+    const expected = computeExpectedTotals(snapshot);
+    const { byMonth, badDate } = await actualMonthlyTotals();
+
+    if (badDate > 0) log(`  注意: 日付不正のレコードが ${badDate} 件あります`, 'warn');
+
+    const allKeys = new Set([...Object.keys(expected), ...Object.keys(byMonth)]);
+    const sorted = [...allKeys].sort();
+
+    let okCount = 0;
+    let mismatchCount = 0;
+    for (const mk of sorted) {
+      const v2sum = byMonth[mk]   || 0;
+      const v1sum = expected[mk] || 0;
+      const diff  = v2sum - v1sum;
+      const cls = diff === 0 ? 'ok' : Math.abs(diff) < 100 ? 'warn' : 'err';
+      if (diff === 0) okCount++; else mismatchCount++;
+      log(`  ${mk}: expected=¥${v1sum.toLocaleString()}, actual=¥${v2sum.toLocaleString()}, 差=¥${diff.toLocaleString()}`, cls);
+    }
+
+    const headline = mismatchCount === 0
+      ? `✓ 全 ${okCount} 月が完全一致`
+      : `✗ ${mismatchCount} 月で差分あり (一致: ${okCount})`;
+    log(headline, mismatchCount === 0 ? 'ok' : 'err');
+    document.getElementById('verify-info').textContent = headline;
+  } catch (e) {
+    log('検証失敗: ' + e.message, 'err');
+  }
+});
+
+log('Ready. まず「1. スナップショット読み込み」を実行してください。', 'info');
+</script>
+</body>
+</html>
