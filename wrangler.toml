@@ -2,6 +2,10 @@ name = "novacore-app"
 compatibility_date = "2026-03-02"
 pages_build_output_dir = "."
 
+# 環境変数（非機密のみ。GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET は Dashboard の Secrets として管理）
+[vars]
+GMAIL_SENDER = "nova.ong.ats@gmail.com"
+
 # KV namespace for Gmail OAuth refresh_token & state.
 # 本番デプロイ前に下記コマンドで namespace を作成し、出力された ID を id と preview_id に貼ること:
 #   npx wrangler kv namespace create NOVA_KV
