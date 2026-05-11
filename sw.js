@@ -1,4 +1,4 @@
-const CACHE_NAME = 'novacore-v15';
+const CACHE_NAME = 'novacore-v20';
 const ASSETS = [
   '/',
   '/index.html',
