@@ -13106,7 +13106,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.1 - PayCalc Pro</title>
+    <title>給与計算システム v2.2 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14842,6 +14842,89 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             }
             return 530000;
         }
+
+        // ============================================================
+        // 給与計算の共通定数 / 共通ヘルパー （v2.2 で追加）
+        // ============================================================
+
+        const PAYROLL_CONSTANTS = {
+            // 2026年度 (令和8年度) 料率
+            pensionRate:          18.3,    // %
+            careRate:             1.82,    // %
+            childSupportRate:     0.23,    // %
+            defaultHealthRate:    9.98,    // % (都道府県マスタ未設定時のフォールバック)
+
+            // 賞与の上限
+            bonusPensionPerTimeCap:  1500000,   // 年金: 150万円/回
+            bonusHealthAnnualCap:    5730000,   // 健保: 573万円/年度（4月-翌年3月）
+
+            // 年収の壁
+            incomeTaxWall:        1030000,  // 103万: 所得税発生
+            insuranceWall:        1300000,  // 130万: 社保扶養外
+            specialDeductWall:    1500000,  // 150万: 配偶者特別控除減
+            notifyTaxWall:         950000,  // 103万接近通知
+            notifyInsuranceWall:  1200000,  // 130万接近通知
+        };
+
+        /**
+         * 社会保険料の本人負担額の端数処理。
+         * 日本の法令: 50銭以下切り捨て、50銭超切り上げ（1円単位）。
+         * @param {number} rawAmount 円未満を含む生計算結果
+         * @returns {number} 1円単位の本人負担額
+         */
+        function roundShakai(rawAmount) {
+            const yen = Math.floor(rawAmount);
+            return (rawAmount - yen) > 0.5 ? yen + 1 : yen;
+        }
+
+        /**
+         * 文字列を HTML エスケープ。innerHTML に従業員名等を埋め込む際に使用。
+         */
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&amp;/g, '&amp;amp;')
+                .replace(/</g, '&amp;lt;')
+                .replace(/>/g, '&amp;gt;')
+                .replace(/&quot;/g, '&amp;quot;')
+                .replace(/'/g, '&amp;#39;');
+        }
+
+        /**
+         * 従業員が「現役」（アーカイブされていない）か。
+         * 過去の給与記録参照のためソフトデリート方式を採用。
+         */
+        function isActiveEmployee(emp) {
+            return emp &amp;&amp; !emp._archived;
+        }
+        function activeEmployees() {
+            return employees.filter(isActiveEmployee);
+        }
+
+        /**
+         * 都道府県別の健康保険料率を取得（フォールバック付き）。
+         */
+        function getHealthRate(pref) {
+            return (healthRates &amp;&amp; healthRates[pref]) || PAYROLL_CONSTANTS.defaultHealthRate;
+        }
+
+        /**
+         * 賞与の年間 健保標準賞与額累計（4月始まり）を返す。
+         * 同年度内で 573 万円を超えると健保対象外。
+         * @param {string} empId
+         * @param {string} payMonth YYYY-MM
+         * @param {string} [excludeKey] 編集中レコードを除外する場合のキー (month|empId)
+         */
+        function getBonusHealthYTD(empId, payMonth, excludeKey) {
+            const [y, m] = payMonth.split('-').map(Number);
+            const fyYear = m >= 4 ? y : y - 1;
+            const fyStart = fyYear + '-04';
+            const fyEnd   = (fyYear + 1) + '-03';
+            return bonusRecords
+                .filter(b => b.empId === empId)
+                .filter(b => b.month >= fyStart &amp;&amp; b.month <= fyEnd)
+                .filter(b => excludeKey ? (b.month + '|' + b.empId) !== excludeKey : true)
+                .reduce((sum, b) => sum + (b.bonusStd || 0), 0);
+        }
         document.addEventListener('DOMContentLoaded', function() {
             loadData();
             initDefaultRates();
@@ -14864,12 +14947,18 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('bonus-form').addEventListener('submit', handleBonusSubmit);
             document.getElementById('rates-form').addEventListener('submit', handleRatesSubmit);
             document.getElementById('health-rates-form').addEventListener('submit', handleHealthRatesSubmit);
+            document.getElementById('bank-account-form').addEventListener('submit', handleBankAccountSubmit);
         });
-        function switchTab(tab) {
+        function switchTab(tab, ev) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
             document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('tab-' + tab).classList.remove('hidden');
-            event.target.classList.add('active');
+            const tabEl = document.getElementById('tab-' + tab);
+            if (tabEl) tabEl.classList.remove('hidden');
+            // クリック起点なら currentTarget、それ以外（通知/postMessage）はラベルから逆引き
+            const btn = (ev &amp;&amp; ev.currentTarget) || (typeof event !== 'undefined' &amp;&amp; event.target)
+                || Array.from(document.querySelectorAll('.nav-tab')).find(b =>
+                    b.getAttribute('onclick') &amp;&amp; b.getAttribute('onclick').indexOf(&quot;'&quot; + tab + &quot;'&quot;) >= 0);
+            if (btn &amp;&amp; btn.classList) btn.classList.add('active');
             if (tab === 'list') filterPayrollList();
             if (tab === 'rates') updateCurrentRateDisplay();
         }
@@ -14909,43 +14998,27 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('emp-employment-check').disabled = !info.insurance.employment;
         }
         function generateEmployeeId(type) {
-            let prefix = '';
-            switch(type) {
-                case 'executive':
-                    prefix = 'EX';
-                    break;
-                case 'regular':
-                    prefix = 'REG';
-                    break;
-                case 'contract':
-                    prefix = 'CON';
-                    break;
-                case 'parttime':
-                case 'parttime-short':
-                    prefix = 'PT';
-                    break;
-                case 'arbeit':
-                    prefix = 'ARB';
-                    break;
-                default:
-                    prefix = 'EMP';
-            }
-            const sameTypeEmployees = employees.filter(emp => {
-                if (type === 'parttime' || type === 'parttime-short') {
-                    return emp.type === 'parttime' || emp.type === 'parttime-short';
-                }
-                return emp.type === type;
-            });
-            let nextNumber = 1;
-            const existingNumbers = sameTypeEmployees
-                .map(emp => emp.id.replace(prefix, ''))
-                .map(num => parseInt(num))
-                .filter(num => !isNaN(num));
-            
-            if (existingNumbers.length > 0) {
-                nextNumber = Math.max(...existingNumbers) + 1;
-            }
-            const newId = prefix + String(nextNumber).padStart(3, '0');
+            const prefixMap = {
+                executive: 'EX',
+                regular:   'REG',
+                contract:  'CON',
+                parttime:  'PT',
+                'parttime-short': 'PT',
+                arbeit:    'ARB',
+            };
+            const prefix = prefixMap[type] || 'EMP';
+            const counterKey = 'payroll_v2_id_counter_' + prefix;
+            // 永続カウンタ: 退職者がいても再利用しない（過去レコードとの混同を防ぐ）
+            let counter = parseInt(localStorage.getItem(counterKey) || '0');
+            // アーカイブ含む既存IDの最大値とカウンタの max を取る（初回マイグレーション時の自己修復）
+            const existing = employees
+                .filter(emp => (prefixMap[emp.type] || 'EMP') === prefix)
+                .map(emp => parseInt(String(emp.id || '').replace(prefix, '')))
+                .filter(n => !isNaN(n));
+            const fromExisting = existing.length ? Math.max.apply(null, existing) : 0;
+            const next = Math.max(counter, fromExisting) + 1;
+            localStorage.setItem(counterKey, String(next));
+            const newId = prefix + String(next).padStart(3, '0');
             document.getElementById('emp-id').value = newId;
         }
         function handleEmployeeSubmit(e) {
@@ -14991,8 +15064,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             } else {
                 employees.push(emp);
             }
-            
-            saveData();
+
+            saveData('employees');
             updateAllTables();
             clearEmployeeForm();
             alert('従業員を登録しました');
@@ -15086,9 +15159,23 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         function deleteEmployee(id) {
-            if (confirm('削除しますか?')) {
+            const emp = employees.find(e => e.id === id);
+            if (!emp) return;
+            const hasRecords = payrollRecords.some(r => r.empId === id)
+                            || bonusRecords.some(r => r.empId === id);
+            if (hasRecords) {
+                const msg = `${emp.name}さんには給与/賞与記録が残っています。\n\n` +
+                    `[OK] 退職処理（給与計算対象外にする・過去データは保持）\n` +
+                    `[キャンセル] 何もしない\n\n` +
+                    `※過去データの照合のため、完全削除は推奨されません。`;
+                if (!confirm(msg)) return;
+                emp._archived = new Date().toISOString();
+                saveData('employees');
+                updateAllTables();
+            } else {
+                if (!confirm(`${emp.name}さんを削除しますか?\n（給与/賞与記録は0件です）`)) return;
                 employees = employees.filter(e => e.id !== id);
-                saveData();
+                saveData('employees');
                 updateAllTables();
             }
         }
@@ -15162,8 +15249,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 successCount++;
             });
             
-            saveData();
-            
+            saveData('records');
+
             let message = `役員一括計算完了\n\n`;
             message += `✅ 計算・保存: ${successCount}名\n`;
             if (skipCount > 0) {
@@ -15308,7 +15395,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             } else {
                 payrollRecords.push({...currentCalculation});
             }
-            saveData();
+            saveData('records');
             alert('保存しました');
         }
         function handleBonusSubmit(e) {
@@ -15318,33 +15405,72 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const bonusAmt = parseInt(document.getElementById('bonus-amount').value) || 0;
             const emp = employees.find(e => e.id === empId);
             if (!emp) { alert('従業員を選択'); return; }
-            
+            if (bonusAmt <= 0) { alert('賞与額を入力してください'); return; }
+
             const rates = getCurrentRates(month);
             if (!rates) { alert('料率未設定'); return; }
-            // 標準賞与額 = 1000円未満切り捨て、上限150万円（健保・年金共通）
-            const bonusStd = Math.min(Math.floor(bonusAmt / 1000) * 1000, 1500000);
-            const healthRate = 9.98; // 簡略化（賞与は固定料率で計算）
-            const health = emp.healthCheck ? Math.floor(bonusStd * healthRate / 100 / 2) : 0;
-            const pension = emp.pensionCheck ? Math.floor(bonusStd * 18.3 / 100 / 2) : 0;
-            const care = emp.careCheck ? Math.floor(bonusStd * 1.82 / 100 / 2) : 0;
-            // 子ども・子育て支援金（2026/4〜、標準賞与額 × 0.23% ÷ 2、上限150万円/回）
-            const childSupport = emp.healthCheck ? Math.floor(bonusStd * 0.23 / 100 / 2) : 0;
-            const employment = emp.employmentCheck ? Math.floor(bonusAmt * rates.employmentEmployee / 100) : 0;
+
+            // ----- 標準賞与額の計算 ---------------------------------
+            // 共通: 1000円未満切り捨て
+            const bonusStdRaw = Math.floor(bonusAmt / 1000) * 1000;
+
+            // 年金保険: 1回 150万円上限
+            const pensionBase = Math.min(bonusStdRaw, PAYROLL_CONSTANTS.bonusPensionPerTimeCap);
+
+            // 健保(+介護+子育て支援金): 年度累計 573万円上限
+            // 既に支給済みの同年度標準賞与額累計を取得し、残り枠で頭打ち
+            const editKey = (currentBonus &amp;&amp; currentBonus.month + '|' + currentBonus.empId) || null;
+            const ytd = getBonusHealthYTD(empId, month, editKey);
+            const remaining = Math.max(0, PAYROLL_CONSTANTS.bonusHealthAnnualCap - ytd);
+            const healthBase = Math.min(bonusStdRaw, remaining);
+            // 表示用の bonusStd は健保ベース（賞与明細上の標準賞与額）
+            const bonusStd = healthBase;
+
+            // ----- 料率（都道府県別の健保） --------------------------
+            const empPref = emp.prefecture || 'tokyo';
+            const healthRate = getHealthRate(empPref);
+
+            // ----- 各種控除（端数は法令準拠で roundShakai） ----------
+            const health = emp.healthCheck
+                ? roundShakai(healthBase * healthRate / 100 / 2) : 0;
+            const pension = emp.pensionCheck
+                ? roundShakai(pensionBase * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0;
+            const care = emp.careCheck
+                ? roundShakai(healthBase * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
+            const childSupport = emp.healthCheck
+                ? roundShakai(healthBase * PAYROLL_CONSTANTS.childSupportRate / 100 / 2) : 0;
+            const employment = emp.employmentCheck
+                ? Math.floor(bonusAmt * rates.employmentEmployee / 100) : 0;
+
             const prevMonth = getPrevMonth(month);
             const prevRec = payrollRecords.find(r => r.empId === empId &amp;&amp; r.month === prevMonth);
-            const prevSalary = prevRec ? prevRec.grossSalary : emp.monthlySalary || 200000;
+            const prevSalary = prevRec ? prevRec.grossSalary : (emp.monthlySalary || 200000);
             const bonusTaxRate = getBonusTaxRate(prevSalary, emp.dependents);
-            const incomeTax = Math.floor((bonusAmt - health - pension - care - childSupport - employment) * bonusTaxRate);
+            const incomeTax = Math.floor(
+                (bonusAmt - health - pension - care - childSupport - employment) * bonusTaxRate);
 
             const totalDed = health + pension + care + childSupport + employment + incomeTax;
             const netAmount = bonusAmt - totalDed;
 
             currentBonus = {
                 month, empId, empName: emp.name, bonusAmt,
-                health, pension, care, childSupport, employment, incomeTax, totalDed, netAmount
+                bonusStd,            // 健保標準賞与額（年度累計用）
+                bonusStdRaw,         // 1000円未満切捨て後の生標準賞与額
+                pensionBase,         // 年金用標準賞与額
+                healthBase,          // 健保用標準賞与額
+                health, pension, care, childSupport, employment,
+                incomeTax, totalDed, netAmount,
+                healthRate, empPref,
             };
-            
+
             displayBonusResults();
+            // 年度累計が上限に達した場合の警告
+            if (healthBase < bonusStdRaw) {
+                alert(`⚠️ 健保年間上限到達\n` +
+                    `この賞与の標準賞与額: ¥${bonusStdRaw.toLocaleString('ja-JP')}\n` +
+                    `健保適用分: ¥${healthBase.toLocaleString('ja-JP')}\n` +
+                    `(年度累計 573万円上限により ¥${(bonusStdRaw - healthBase).toLocaleString('ja-JP')} が健保対象外)`);
+            }
         }
 
         function displayBonusResults() {
@@ -15362,8 +15488,16 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         function saveBonusCalculation() {
             if (!currentBonus) return;
-            bonusRecords.push({...currentBonus});
-            saveData();
+            // 同月・同従業員の既存賞与レコードを上書き（無ければ追加）
+            const idx = bonusRecords.findIndex(b =>
+                b.month === currentBonus.month &amp;&amp; b.empId === currentBonus.empId);
+            if (idx >= 0) {
+                if (!confirm('既に同月の賞与記録があります。上書きしますか?')) return;
+                bonusRecords[idx] = {...currentBonus};
+            } else {
+                bonusRecords.push({...currentBonus});
+            }
+            saveData('bonus');
             updateBonusHistory();
             alert('賞与を保存しました');
         }
@@ -15389,7 +15523,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         function deleteBonus(month, empId) {
             if (confirm('削除しますか?')) {
                 bonusRecords = bonusRecords.filter(b => !(b.month === month &amp;&amp; b.empId === empId));
-                saveData();
+                saveData('bonus');
                 updateBonusHistory();
             }
         }
@@ -15618,13 +15752,15 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const avg = Math.floor(salaries.reduce((a,b) => a+b,0) / salaries.length);
                 const std = getStandardRemuneration(avg);
                 const empPref = emp.prefecture || 'tokyo';
-                const healthRate = healthRates[empPref] || 9.98;
-                
-                const health = Math.floor(std * healthRate / 100 / 2);
-                const pension = Math.floor(std * 18.3 / 100 / 2);
-                const care = emp.careCheck ? Math.floor(std * 1.82 / 100 / 2) : 0;
+                const healthRate = getHealthRate(empPref);
+
+                // 法令準拠の端数処理 (50銭以下切り捨て・50銭超切り上げ)
+                const health  = roundShakai(std * healthRate / 100 / 2);
+                const pension = roundShakai(std * PAYROLL_CONSTANTS.pensionRate / 100 / 2);
+                const care    = emp.careCheck   ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
                 // 子ども・子育て支援金 (2026/4〜)：全国一律 0.23%、労使折半
-                const childSupport = emp.healthCheck ? Math.floor(std * 0.23 / 100 / 2) : 0;
+                const childSupport = emp.healthCheck
+                    ? roundShakai(std * PAYROLL_CONSTANTS.childSupportRate / 100 / 2) : 0;
 
                 assessmentData.push({
                     empId: emp.id,
@@ -15685,7 +15821,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     cnt++;
                 }
             });
-            saveData();
+            saveData('employees');
             updateAllTables();
             alert(`${cnt}名の従業員マスタを更新しました`);
         }
@@ -15728,7 +15864,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 insuranceRates.push(rate);
             }
             insuranceRates.sort((a,b) => b.effectiveDate.localeCompare(a.effectiveDate));
-            saveData();
+            saveData('rates');
             updateCurrentRateDisplay();
             alert('保存しました');
         }
@@ -15741,7 +15877,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 aichi: parseFloat(document.getElementById('health-rate-aichi').value),
                 gifu: parseFloat(document.getElementById('health-rate-gifu').value)
             };
-            saveData();
+            saveData('healthRates');
             updateHealthRatesDisplay();
             alert('健康保険料率を更新しました');
         }
@@ -15765,10 +15901,10 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         function getCurrentRates(month) {
-            for (let rate of insuranceRates) {
-                if (rate.effectiveDate <= month) return rate;
-            }
-            return null;
+            // 暗黙のソート順に依存しないため、毎回降順ソートしてから検索する
+            const sorted = [...insuranceRates].sort((a, b) =>
+                (b.effectiveDate || '').localeCompare(a.effectiveDate || ''));
+            return sorted.find(rate => rate.effectiveDate <= month) || null;
         }
 
         function updateCurrentRateDisplay() {
@@ -15871,22 +16007,36 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         function autoCalcChildSupport() {
             const healthAmt = parseInt(document.getElementById('emp-health-amount').value) || 0;
             const pref = document.getElementById('emp-prefecture').value || 'tokyo';
-            const hr = (healthRates &amp;&amp; healthRates[pref]) || 9.98;
+            const hr = getHealthRate(pref);
             if (healthAmt <= 0) {
                 alert('先に「健康保険料（本人負担）」を入力してください。\\n（または算定基礎届タブで一括計算）');
                 return;
             }
-            const childSupport = Math.floor(healthAmt * 0.23 / hr);
+            // 法令準拠の端数処理。Math.floor からの差は最大 1 円。
+            const childSupport = roundShakai(healthAmt * PAYROLL_CONSTANTS.childSupportRate / hr);
             document.getElementById('emp-child-amount').value = childSupport;
         }
 
-        function saveData() {
-            localStorage.setItem('payroll_v2_employees', JSON.stringify(employees));
-            localStorage.setItem('payroll_v2_records', JSON.stringify(payrollRecords));
-            localStorage.setItem('payroll_v2_bonus', JSON.stringify(bonusRecords));
-            localStorage.setItem('payroll_v2_rates', JSON.stringify(insuranceRates));
-            localStorage.setItem('payroll_v2_health_rates', JSON.stringify(healthRates));
-            localStorage.setItem('payroll_v2_bank_accounts', JSON.stringify(bankAccounts));
+        /**
+         * 差分保存。引数省略時は全キー保存（後方互換）。
+         * @example saveData('employees')             // 従業員のみ保存
+         * @example saveData('records', 'employees')  // 給与記録と従業員のみ保存
+         * @example saveData()                         // 全データ保存（旧来動作）
+         */
+        function saveData(...keys) {
+            const writers = {
+                employees:    () => localStorage.setItem('payroll_v2_employees',    JSON.stringify(employees)),
+                records:      () => localStorage.setItem('payroll_v2_records',      JSON.stringify(payrollRecords)),
+                bonus:        () => localStorage.setItem('payroll_v2_bonus',        JSON.stringify(bonusRecords)),
+                rates:        () => localStorage.setItem('payroll_v2_rates',        JSON.stringify(insuranceRates)),
+                healthRates:  () => localStorage.setItem('payroll_v2_health_rates', JSON.stringify(healthRates)),
+                bankAccounts: () => localStorage.setItem('payroll_v2_bank_accounts',JSON.stringify(bankAccounts)),
+            };
+            const targets = keys.length ? keys : Object.keys(writers);
+            for (const k of targets) {
+                if (writers[k]) writers[k]();
+                else console.warn('saveData: unknown key', k);
+            }
         }
 
         function loadData() {
@@ -15938,46 +16088,88 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             alert(`✅ データをエクスポートしました\n\nファイル名: ${filename}\n\n【エクスポート内容】\n従業員: ${employees.length}名\n給与記録: ${payrollRecords.length}件\n賞与記録: ${bonusRecords.length}件\n銀行口座: ${Object.keys(bankAccounts).length}件\n雇用保険料率: ${insuranceRates.length}件\n健康保険料率: 4都道府県`);
         }
 
+        /**
+         * インポート JSON のスキーマ検証。失敗時は例外を投げる。
+         */
+        function validateImportSchema(data) {
+            if (!data || typeof data !== 'object') {
+                throw new Error('JSON 構造が不正です');
+            }
+            if (typeof data.version !== 'string' || !/^2\.\d+(\.\d+)?$/.test(data.version)) {
+                throw new Error(`非対応バージョン: ${data.version}（v2.x のみサポート）`);
+            }
+            if (!Array.isArray(data.employees)) {
+                throw new Error('employees が配列ではありません');
+            }
+            data.employees.forEach((e, i) => {
+                if (!e || typeof e !== 'object') throw new Error(`employees[${i}] が不正`);
+                if (typeof e.id !== 'string' || !e.id) throw new Error(`employees[${i}].id が不正`);
+                if (typeof e.name !== 'string') throw new Error(`employees[${i}].name が不正`);
+            });
+            // 任意フィールドの最低限の型チェック
+            if (data.payrollRecords &amp;&amp; !Array.isArray(data.payrollRecords))
+                throw new Error('payrollRecords が配列ではありません');
+            if (data.bonusRecords &amp;&amp; !Array.isArray(data.bonusRecords))
+                throw new Error('bonusRecords が配列ではありません');
+            if (data.insuranceRates &amp;&amp; !Array.isArray(data.insuranceRates))
+                throw new Error('insuranceRates が配列ではありません');
+            if (data.healthRates &amp;&amp; typeof data.healthRates !== 'object')
+                throw new Error('healthRates がオブジェクトではありません');
+            if (data.bankAccounts &amp;&amp; typeof data.bankAccounts !== 'object')
+                throw new Error('bankAccounts がオブジェクトではありません');
+        }
+
         function importData() {
             const fileInput = document.getElementById('import-file');
             const file = fileInput.files[0];
-            
+
             if (!file) {
                 alert('ファイルを選択してください');
                 return;
             }
-            
-            if (!confirm('⚠️ 警告\n\n現在のすべてのデータが上書きされます。\n本当に実行しますか？')) {
+
+            if (!confirm('⚠️ 警告\n\n現在のすべてのデータが上書きされます。\nインポート前に自動バックアップを取ります。\n\n本当に実行しますか？')) {
                 return;
             }
-            
+
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
                     const importedData = JSON.parse(e.target.result);
-                    if (!importedData.version || !importedData.employees) {
-                        alert('無効なファイル形式です');
-                        return;
+                    validateImportSchema(importedData);
+
+                    // 自動バックアップ（インポート前の状態を保持）
+                    const backup = {
+                        savedAt: new Date().toISOString(),
+                        reason: 'before-import',
+                        employees, payrollRecords, bonusRecords,
+                        insuranceRates, healthRates, bankAccounts,
+                    };
+                    try {
+                        localStorage.setItem('payroll_v2_backup', JSON.stringify(backup));
+                    } catch (storageErr) {
+                        if (!confirm('バックアップ保存に失敗しました（容量不足等）。\nバックアップ無しでインポートを続行しますか？')) return;
                     }
-                    employees = importedData.employees || [];
+
+                    employees      = importedData.employees      || [];
                     payrollRecords = importedData.payrollRecords || [];
-                    bonusRecords = importedData.bonusRecords || [];
+                    bonusRecords   = importedData.bonusRecords   || [];
                     insuranceRates = importedData.insuranceRates || [];
-                    healthRates = importedData.healthRates || {};
-                    bankAccounts = importedData.bankAccounts || {};
+                    healthRates    = importedData.healthRates    || {};
+                    bankAccounts   = importedData.bankAccounts   || {};
                     saveData();
                     updateAllTables();
                     updateCurrentRateDisplay();
                     updateHealthRatesDisplay();
-                    
-                    alert(`✅ データをインポートしました\n\nエクスポート日時: ${new Date(importedData.exportDate).toLocaleString('ja-JP')}\n\n従業員: ${employees.length}名\n給与記録: ${payrollRecords.length}件\n賞与記録: ${bonusRecords.length}件\n\nページを再読み込みしてください。`);
+
+                    alert(`✅ データをインポートしました\n\nエクスポート日時: ${new Date(importedData.exportDate).toLocaleString('ja-JP')}\n\n従業員: ${employees.length}名\n給与記録: ${payrollRecords.length}件\n賞与記録: ${bonusRecords.length}件\n\n※ インポート前のバックアップが payroll_v2_backup に保存されています`);
                     fileInput.value = '';
-                    
+
                 } catch (error) {
-                    alert('エラー: ファイルの読み込みに失敗しました\n\n' + error.message);
+                    alert('エラー: インポート失敗\n\n' + error.message + '\n\n現在のデータは変更されていません。');
                 }
             };
-            
+
             reader.readAsText(file);
         }
 
@@ -16031,7 +16223,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     .reduce((sum, r) => sum + r.grossSalary, 0);
                 const yearBonus = bonusRecords
                     .filter(r => r.empId === emp.id &amp;&amp; r.month.startsWith(year.toString()))
-                    .reduce((sum, r) => sum + r.grossBonus, 0);
+                    .reduce((sum, r) => sum + (r.bonusAmt || r.grossBonus || 0), 0);
+                    // 旧フィールド名 grossBonus が残っている場合のフォールバック
                 const yearTax = payrollRecords
                     .filter(r => r.empId === emp.id &amp;&amp; r.month.startsWith(year.toString()))
                     .reduce((sum, r) => sum + r.incomeTax, 0);
@@ -16244,29 +16437,30 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         function deleteBankAccount(empId) {
             if (confirm('この銀行口座情報を削除しますか？')) {
                 delete bankAccounts[empId];
-                saveData();
+                saveData('bankAccounts');
                 updateBankAccountTable();
             }
         }
 
-        document.getElementById('bank-account-form').addEventListener('submit', function(e) {
+        function handleBankAccountSubmit(e) {
             e.preventDefault();
             const empId = document.getElementById('bank-emp-select').value;
-            
+            if (!empId) { alert('従業員を選択してください'); return; }
+
             bankAccounts[empId] = {
-                bankName: document.getElementById('bank-name').value,
-                branchName: document.getElementById('branch-name').value,
-                accountType: document.getElementById('account-type').value,
+                bankName:      document.getElementById('bank-name').value,
+                branchName:    document.getElementById('branch-name').value,
+                accountType:   document.getElementById('account-type').value,
                 accountNumber: document.getElementById('account-number').value,
                 accountHolder: document.getElementById('account-holder').value
             };
-            
-            saveData();
+
+            saveData('bankAccounts');
             updateBankAccountTable();
             closeModal('bank-account-modal');
             document.getElementById('bank-account-form').reset();
             alert('銀行口座情報を登録しました');
-        });
+        }
         function createBankTransferData() {
             const month = document.getElementById('list-month').value;
             if (!month) {
@@ -16294,17 +16488,30 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             let csv = '';
             const today = new Date();
             const transferDate = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
-            
+
+            // 全銀協 振込フォーマット風: 口座名義は全角カナ・全角スペース埋め（30バイト相当 = 全角15文字）
+            const FULL_WIDTH_SPACE = '　';
+            const HOLDER_FULL_WIDTH_CHARS = 15; // 30 バイト ÷ 2バイト/全角文字
+
+            function padHolder(name) {
+                // 半角文字（カタカナ含む）を全角に変換するのが本来だが、最低限の互換のため
+                // 全角スペースで埋めるだけにする。文字数超過時は切り詰め。
+                const trimmed = (name || '').slice(0, HOLDER_FULL_WIDTH_CHARS);
+                return trimmed + FULL_WIDTH_SPACE.repeat(HOLDER_FULL_WIDTH_CHARS - trimmed.length);
+            }
+
             filtered.forEach(rec => {
                 const account = bankAccounts[rec.empId];
                 if (!account) return;
                 const amount = String(rec.netSalary).padStart(10, '0');
-                const accountNumber = account.accountNumber.padStart(7, '0');
-                const accountHolder = account.accountHolder.padEnd(30, ' ');
-                
+                const accountNumber = (account.accountNumber || '').padStart(7, '0');
+                const accountHolder = padHolder(account.accountHolder);
+
                 csv += `${transferDate},${account.bankName},${account.branchName},${account.accountType},${accountNumber},${accountHolder},${amount}\n`;
             });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            // 全銀協形式は Shift_JIS が正式だが、CSV としては UTF-8 BOM 付きが多くのソフトで開きやすい
+            const BOM = '﻿';
+            const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
@@ -16325,11 +16532,12 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             }
         });
 
-        window.onclick = function(event) {
-            if (event.target.classList.contains('modal')) {
+        // モーダル外クリックで閉じる（addEventListener で登録し、他スクリプトと衝突しないようにする）
+        window.addEventListener('click', function(event) {
+            if (event.target &amp;&amp; event.target.classList &amp;&amp; event.target.classList.contains('modal')) {
                 event.target.classList.remove('active');
             }
-        }
+        });
     </script>
 
 <style id=&quot;nc-payroll-embed&quot;>
