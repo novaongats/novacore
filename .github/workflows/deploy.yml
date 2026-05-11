@@ -1,0 +1,32 @@
+name: Deploy to Cloudflare Pages
+
+# main への push、もしくは Actions タブから手動 (workflow_dispatch) で実行。
+# 本リポジトリは Cloudflare Pages の Git 連携を使っていないため、
+# このワークフローが唯一の自動デプロイ経路。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # 同じブランチでデプロイが走っている間は後発を待たせる（古い結果が新しい結果を上書きしないように）
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout (tracked files only — .gitignore で除外したファイルは含まれない)
+        uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Pages (production)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy . --project-name=novacore --branch=main --commit-dirty=true
