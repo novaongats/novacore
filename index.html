@@ -13859,7 +13859,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.0 - PayCalc Pro</title>
+    <title>給与計算システム v2.1 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14613,6 +14613,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <label class=&quot;form-label&quot;>介護保険料（本人負担）円</label>
                             <input type=&quot;number&quot; class=&quot;form-input&quot; id=&quot;emp-care-amount&quot; value=&quot;0&quot;>
                         </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>子育て支援金（本人負担）円 <span style=&quot;font-size:10px;color:#64748b;&quot;>※2026/4〜</span></label>
+                            <input type=&quot;number&quot; class=&quot;form-input&quot; id=&quot;emp-child-amount&quot; value=&quot;0&quot;>
+                            <div style=&quot;margin-top:4px;font-size:10px;&quot;>
+                                <button type=&quot;button&quot; onclick=&quot;autoCalcChildSupport()&quot; style=&quot;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:5px;padding:4px 10px;font-size:10px;cursor:pointer;&quot;>↻ 健康保険料から自動算出</button>
+                                <span style=&quot;color:#64748b;margin-left:6px;&quot;>標準報酬月額 × 0.23% ÷ 2（労使折半）</span>
+                            </div>
+                        </div>
                     </div>
                     <h3 style=&quot;margin: 20px 0 10px 0; font-size: 16px; color: var(--primary);&quot;>保険加入状況</h3>
                     <div class=&quot;form-grid&quot;>
@@ -14703,6 +14711,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>健康保険料</div><div class=&quot;calc-value&quot; id=&quot;result-health&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>厚生年金保険料</div><div class=&quot;calc-value&quot; id=&quot;result-pension&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>介護保険料</div><div class=&quot;calc-value&quot; id=&quot;result-care&quot;>¥0</div></div>
+                            <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>子育て支援金</div><div class=&quot;calc-value&quot; id=&quot;result-child&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>雇用保険料</div><div class=&quot;calc-value&quot; id=&quot;result-employment&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>所得税</div><div class=&quot;calc-value&quot; id=&quot;result-tax&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>住民税</div><div class=&quot;calc-value&quot; id=&quot;result-resident&quot;>¥0</div></div>
@@ -14756,6 +14765,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>健康保険料</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-health&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>厚生年金保険料</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-pension&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>介護保険料</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-care&quot;>¥0</div></div>
+                            <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>子育て支援金</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-child&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>雇用保険料</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-employment&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>所得税</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-tax&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>控除合計</div><div class=&quot;calc-value&quot; id=&quot;bonus-result-total-ded&quot;>¥0</div></div>
@@ -14795,14 +14805,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <thead>
                             <tr>
                                 <th>ID</th><th>氏名</th><th>年月</th><th>基本給</th><th>歩合/時給</th><th>手当</th><th>控除</th>
-                                <th>総支給</th><th>健保</th><th>年金</th><th>介護</th><th>雇用</th>
-                                <th>所得税</th><th>住民税</th><th>控除計</th><th>差引支給</th><th class=&quot;no-print&quot; style=&quot;min-width:120px;&quot;>操作</th>
+                                <th>総支給</th><th>健保</th><th>年金</th><th>介護</th><th>支援金</th><th>雇用</th>
+                                <th>所得税</th><th>住民税</th><th>控除計</th><th>差引支給</th><th class=&quot;no-print&quot;>操作</th>
                             </tr>
                         </thead>
                         <tbody id=&quot;payroll-tbody&quot;></tbody>
                         <tfoot style=&quot;display: none;&quot; class=&quot;print-total-row&quot;>
                             <tr class=&quot;print-total-row&quot;>
-                                <td colspan=&quot;15&quot; style=&quot;border: none;&quot;></td>
+                                <td colspan=&quot;16&quot; style=&quot;border: none;&quot;></td>
                                 <td class=&quot;print-total-cell&quot;>月次振込金額合計: <span id=&quot;total-payment-print&quot;>¥0</span></td>
                             </tr>
                         </tfoot>
@@ -14884,7 +14894,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     <div class=&quot;table-container&quot;>
                         <table class=&quot;table&quot; id=&quot;assessment-table&quot;>
                             <thead>
-                                <tr><th>ID</th><th>氏名</th><th>都道府県</th><th>4月</th><th>5月</th><th>6月</th><th>平均額</th><th>標準報酬月額</th><th>健保</th><th>年金</th><th>介護</th></tr>
+                                <tr><th>ID</th><th>氏名</th><th>都道府県</th><th>4月</th><th>5月</th><th>6月</th><th>平均額</th><th>標準報酬月額</th><th>健保</th><th>年金</th><th>介護</th><th>支援金</th></tr>
                             </thead>
                             <tbody id=&quot;assessment-tbody&quot;></tbody>
                         </table>
@@ -15878,7 +15888,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 employmentCheck: document.getElementById('emp-employment-check').checked,
                 healthAmount: parseInt(document.getElementById('emp-health-amount').value) || 0,
                 pensionAmount: parseInt(document.getElementById('emp-pension-amount').value) || 0,
-                careAmount: parseInt(document.getElementById('emp-care-amount').value) || 0
+                careAmount: parseInt(document.getElementById('emp-care-amount').value) || 0,
+                childSupportAmount: parseInt(document.getElementById('emp-child-amount').value) || 0
             };
             
             if (info.salary === 'monthly') {
@@ -15981,6 +15992,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('emp-health-amount').value = emp.healthAmount;
             document.getElementById('emp-pension-amount').value = emp.pensionAmount;
             document.getElementById('emp-care-amount').value = emp.careAmount;
+            document.getElementById('emp-child-amount').value = emp.childSupportAmount || 0;
             if (emp.salary === 'monthly') {
                 document.getElementById('emp-monthly-salary').value = emp.monthlySalary;
                 document.getElementById('emp-resident-tax-m').value = emp.residentTax;
@@ -16044,12 +16056,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const health = emp.healthCheck ? emp.healthAmount : 0;
                 const pension = emp.pensionCheck ? emp.pensionAmount : 0;
                 const care = emp.careCheck ? emp.careAmount : 0;
+                // 子ども・子育て支援金（2026/4〜）
+                const childSupport = emp.healthCheck ? (emp.childSupportAmount || 0) : 0;
                 const employment = 0; // 役員は雇用保険なし
                 const incomeTax = calculateIncomeTax(grossSalary, emp.dependents);
                 const residentTax = emp.residentTax;
-                const totalDed = health + pension + care + employment + incomeTax + residentTax;
+                const totalDed = health + pension + care + childSupport + employment + incomeTax + residentTax;
                 const netSalary = grossSalary - totalDed;
-                
+
                 const calculation = {
                     month,
                     empId: emp.id,
@@ -16063,6 +16077,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     health,
                     pension,
                     care,
+                    childSupport,
                     employment,
                     incomeTax,
                     residentTax,
@@ -16167,16 +16182,18 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const health = emp.healthCheck ? emp.healthAmount : 0;
             const pension = emp.pensionCheck ? emp.pensionAmount : 0;
             const care = emp.careCheck ? emp.careAmount : 0;
+            // 子ども・子育て支援金（2026/4〜、健康保険加入者が対象、労使折半 0.115%）
+            const childSupport = emp.healthCheck ? (emp.childSupportAmount || 0) : 0;
             const employment = emp.employmentCheck ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
             const incomeTax = calculateIncomeTax(grossSalary, emp.dependents);
             const residentTax = emp.residentTax;
-            const totalDed = health + pension + care + employment + incomeTax + residentTax;
+            const totalDed = health + pension + care + childSupport + employment + incomeTax + residentTax;
             const netSalary = grossSalary - totalDed;
-            
+
             currentCalculation = {
                 month, empId, empName: emp.name, empType: emp.type,
                 basePay, commission, allowance, deduction, grossSalary,
-                health, pension, care, employment, incomeTax, residentTax, totalDed, netSalary
+                health, pension, care, childSupport, employment, incomeTax, residentTax, totalDed, netSalary
             };
             
             displayCalculationResults();
@@ -16189,6 +16206,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('result-health').textContent = formatCurrency(currentCalculation.health);
             document.getElementById('result-pension').textContent = formatCurrency(currentCalculation.pension);
             document.getElementById('result-care').textContent = formatCurrency(currentCalculation.care);
+            document.getElementById('result-child').textContent = formatCurrency(currentCalculation.childSupport || 0);
             document.getElementById('result-employment').textContent = formatCurrency(currentCalculation.employment);
             document.getElementById('result-tax').textContent = formatCurrency(currentCalculation.incomeTax);
             document.getElementById('result-resident').textContent = formatCurrency(currentCalculation.residentTax);
@@ -16252,24 +16270,27 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             
             const rates = getCurrentRates(month);
             if (!rates) { alert('料率未設定'); return; }
-            const bonusStd = Math.floor(bonusAmt / 1000) * 1000;
-            const healthRate = 9.98; // 簡略化
+            // 標準賞与額 = 1000円未満切り捨て、上限150万円（健保・年金共通）
+            const bonusStd = Math.min(Math.floor(bonusAmt / 1000) * 1000, 1500000);
+            const healthRate = 9.98; // 簡略化（賞与は固定料率で計算）
             const health = emp.healthCheck ? Math.floor(bonusStd * healthRate / 100 / 2) : 0;
             const pension = emp.pensionCheck ? Math.floor(bonusStd * 18.3 / 100 / 2) : 0;
             const care = emp.careCheck ? Math.floor(bonusStd * 1.82 / 100 / 2) : 0;
+            // 子ども・子育て支援金（2026/4〜、標準賞与額 × 0.23% ÷ 2、上限150万円/回）
+            const childSupport = emp.healthCheck ? Math.floor(bonusStd * 0.23 / 100 / 2) : 0;
             const employment = emp.employmentCheck ? Math.floor(bonusAmt * rates.employmentEmployee / 100) : 0;
             const prevMonth = getPrevMonth(month);
             const prevRec = payrollRecords.find(r => r.empId === empId &amp;&amp; r.month === prevMonth);
             const prevSalary = prevRec ? prevRec.grossSalary : emp.monthlySalary || 200000;
             const bonusTaxRate = getBonusTaxRate(prevSalary, emp.dependents);
-            const incomeTax = Math.floor((bonusAmt - health - pension - care - employment) * bonusTaxRate);
-            
-            const totalDed = health + pension + care + employment + incomeTax;
+            const incomeTax = Math.floor((bonusAmt - health - pension - care - childSupport - employment) * bonusTaxRate);
+
+            const totalDed = health + pension + care + childSupport + employment + incomeTax;
             const netAmount = bonusAmt - totalDed;
-            
+
             currentBonus = {
                 month, empId, empName: emp.name, bonusAmt,
-                health, pension, care, employment, incomeTax, totalDed, netAmount
+                health, pension, care, childSupport, employment, incomeTax, totalDed, netAmount
             };
             
             displayBonusResults();
@@ -16281,6 +16302,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('bonus-result-health').textContent = formatCurrency(currentBonus.health);
             document.getElementById('bonus-result-pension').textContent = formatCurrency(currentBonus.pension);
             document.getElementById('bonus-result-care').textContent = formatCurrency(currentBonus.care);
+            document.getElementById('bonus-result-child').textContent = formatCurrency(currentBonus.childSupport || 0);
             document.getElementById('bonus-result-employment').textContent = formatCurrency(currentBonus.employment);
             document.getElementById('bonus-result-tax').textContent = formatCurrency(currentBonus.incomeTax);
             document.getElementById('bonus-result-total-ded').textContent = formatCurrency(currentBonus.totalDed);
@@ -16587,6 +16609,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.health)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.pension)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.care)}</td>
+                    <td class=&quot;text-right&quot; style=&quot;font-size:9px;background:${(rec.childSupport||0)>0?'#fef3c7':''};&quot;>${formatCurrency(rec.childSupport || 0)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.employment)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.incomeTax)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.residentTax)}</td>
@@ -16800,6 +16823,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>健康保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.health)}</td></tr>
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>厚生年金保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.pension)}</td></tr>
                             ${data.care > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>介護保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.care)}</td></tr>` : ''}
+                            ${(data.childSupport || 0) > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>子ども・子育て支援金</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.childSupport)}</td></tr>` : ''}
                             ${data.employment > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>雇用保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.employment)}</td></tr>` : ''}
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>所得税</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.incomeTax)}</td></tr>
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>住民税</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.residentTax)}</td></tr>
@@ -16867,19 +16891,22 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const health = Math.floor(std * healthRate / 100 / 2);
                 const pension = Math.floor(std * 18.3 / 100 / 2);
                 const care = emp.careCheck ? Math.floor(std * 1.82 / 100 / 2) : 0;
-                
-                assessmentData.push({ 
-                    empId: emp.id, 
-                    empName: emp.name, 
+                // 子ども・子育て支援金 (2026/4〜)：全国一律 0.23%、労使折半
+                const childSupport = emp.healthCheck ? Math.floor(std * 0.23 / 100 / 2) : 0;
+
+                assessmentData.push({
+                    empId: emp.id,
+                    empName: emp.name,
                     prefecture: empPref,
-                    aprAmt, 
-                    mayAmt, 
-                    junAmt, 
-                    avg, 
-                    std, 
-                    health, 
-                    pension, 
-                    care 
+                    aprAmt,
+                    mayAmt,
+                    junAmt,
+                    avg,
+                    std,
+                    health,
+                    pension,
+                    care,
+                    childSupport
                 });
             });
             
@@ -16907,6 +16934,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     <td class=&quot;text-right&quot; style=&quot;font-size:10px;&quot;>${formatCurrency(d.health)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:10px;&quot;>${formatCurrency(d.pension)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:10px;&quot;>${formatCurrency(d.care)}</td>
+                    <td class=&quot;text-right&quot; style=&quot;font-size:10px;background:#fef3c7;&quot;>${formatCurrency(d.childSupport || 0)}</td>
                 `;
             });
             document.getElementById('assessment-result').classList.remove('hidden');
@@ -16921,6 +16949,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     emp.healthAmount = d.health;
                     emp.pensionAmount = d.pension;
                     emp.careAmount = d.care;
+                    emp.childSupportAmount = d.childSupport || 0;
                     cnt++;
                 }
             });
@@ -17081,6 +17110,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>健康保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.health)}</td></tr>
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>厚生年金保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.pension)}</td></tr>
                         ${data.care > 0 ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>介護保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.care)}</td></tr>` : ''}
+                        ${(data.childSupport || 0) > 0 ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>子ども・子育て支援金</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.childSupport)}</td></tr>` : ''}
                         ${data.employment > 0 ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>雇用保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.employment)}</td></tr>` : ''}
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>所得税</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.incomeTax)}</td></tr>
                         <tr style=&quot;background:#eaecf3;font-weight:bold;&quot;><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>控除合計</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.totalDed)}</td></tr>
@@ -17097,6 +17127,25 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
         function formatCurrency(amt) {
             return '¥' + amt.toLocaleString('ja-JP');
+        }
+
+        /**
+         * 子ども・子育て支援金（本人負担分）を健康保険料から逆算する。
+         *   健康保険料 = 標準報酬月額 × 都道府県料率 / 100 / 2
+         *   ⇒ 標準報酬月額 = 健康保険料 × 200 / 都道府県料率
+         *   ⇒ 子育て支援金 = 標準報酬月額 × 0.23 / 100 / 2 = 健康保険料 × 0.23 / 都道府県料率
+         * 2026年度（令和8年度）料率 = 0.23%（全国一律、労使折半 0.115%）。
+         */
+        function autoCalcChildSupport() {
+            const healthAmt = parseInt(document.getElementById('emp-health-amount').value) || 0;
+            const pref = document.getElementById('emp-prefecture').value || 'tokyo';
+            const hr = (healthRates &amp;&amp; healthRates[pref]) || 9.98;
+            if (healthAmt <= 0) {
+                alert('先に「健康保険料（本人負担）」を入力してください。\\n（または算定基礎届タブで一括計算）');
+                return;
+            }
+            const childSupport = Math.floor(healthAmt * 0.23 / hr);
+            document.getElementById('emp-child-amount').value = childSupport;
         }
 
         function saveData() {

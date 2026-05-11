@@ -1,0 +1,3 @@
+# Production data snapshots — never commit customer / financial data.
+*.json
+!.gitkeep
