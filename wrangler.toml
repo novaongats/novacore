@@ -11,5 +11,5 @@ pages_build_output_dir = "."
 # 下記の id/preview_id は本番デプロイ時のみ必須（仮値だとデプロイ時に警告が出る）。
 [[kv_namespaces]]
 binding = "NOVA_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_PREVIEW_NAMESPACE_ID"
+id = "41a025391d7b425b9c01aa7c729fa413"
+preview_id = "f4e5a67621bb4672ad741c968d731f61"
