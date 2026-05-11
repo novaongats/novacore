@@ -355,6 +355,9 @@ html { overflow-x:hidden; width:100%; max-width:100vw; }
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+<!-- 給与明細 PDF 生成用（一斉送信機能） -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <button id="globalReload" onclick="if('caches' in window){caches.keys().then(function(k){k.forEach(function(n){caches.delete(n)})}).then(function(){location.reload()})}else{location.reload()}" style="position:fixed;top:12px;right:12px;z-index:999999;width:36px;height:36px;border-radius:50%;border:none;background:rgba(99,102,241,0.9);color:#fff;font-size:16px;cursor:pointer;box-shadow:0 2px 12px rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center;transition:all .2s;backdrop-filter:blur(8px)" onmouseover="this.style.transform='rotate(180deg)'" onmouseout="this.style.transform=''">↻</button>
@@ -8213,15 +8216,57 @@ table td{font-size:13px!important;color:var(--nc-text2,#4a4a60)!important}
       </div>
     </div>
 
+    <!-- Gmail 連携カード -->
+    <div style="margin-top:14px;background:#fff;border:1px solid #e0e2ec;border-radius:12px;padding:16px 18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div style="font-weight:700;color:#1a1a2e">📨 Gmail 連携</div>
+        <div id="psmConnState" style="font-size:12px;color:#8b8ba0">読み込み中…</div>
+      </div>
+      <div id="psmConnDetails" style="font-size:12px;color:#4a5568;margin-bottom:12px;line-height:1.6"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="psmConnectBtn" onclick="psmStartOAuth()" style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🔗 Google と連携する</button>
+        <button id="psmReconnectBtn" onclick="psmStartOAuth()" style="display:none;background:#fff;color:#6366f1;border:1px solid #6366f1;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🔄 連携をやり直す</button>
+      </div>
+    </div>
+
+    <!-- 一斉送信カード -->
+    <div id="psmSendCard" style="display:none;margin-top:14px;background:#fff;border:1px solid #e0e2ec;border-radius:12px;padding:16px 18px">
+      <div style="font-weight:700;color:#1a1a2e;margin-bottom:12px">📧 給与明細を一斉送信</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#4a5568;margin-bottom:4px">対象年月</label>
+          <input id="psmYM" type="month" style="width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box">
+          <div style="font-size:11px;color:#8b8ba0;margin-top:4px">給与計算で作成済の月を選んでください</div>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#4a5568;margin-bottom:4px">テスト送信先（任意）</label>
+          <input id="psmTestTo" type="email" placeholder="自分のメアド" style="width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box">
+          <div style="font-size:11px;color:#8b8ba0;margin-top:4px">入力すると全員分をこのアドレスに送ります（送信先には届きません）</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button onclick="psmSendMails(true)" style="background:#fff;color:#4f46e5;border:1px solid #c7d2fe;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🧪 テスト送信</button>
+        <button onclick="psmSendMails(false)" style="background:#10b981;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">✅ 本番送信</button>
+        <div id="psmSendProgress" style="font-size:12px;color:#4a5568;margin-left:8px"></div>
+      </div>
+      <div id="psmSendResult" style="margin-top:12px;font-size:12px;display:none"></div>
+    </div>
+
     <!-- 説明 -->
     <div style="margin-top:14px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px 14px;font-size:12px;color:#4338ca;line-height:1.6">
-      <div style="font-weight:700;margin-bottom:4px">📌 編集方法</div>
-      メールアドレスの追加・変更は、<b>給与計算 → 従業員マスタ</b>の編集フォーム内「メールアドレス（給与明細送付用）」欄から行います。
-      ここではマスタの内容を読み取って表示するだけなので、データの二重管理は発生しません。
-      <br><br>
-      <span style="color:#7c3aed">⏳ Gmail 一斉送信機能（Pages Functions + OAuth 連携）は次のステップで実装予定。</span>
+      <div style="font-weight:700;margin-bottom:4px">📌 操作の流れ</div>
+      <ol style="margin:4px 0 0 18px;padding:0">
+        <li>「Google と連携する」を 1 回押して Gmail を許可（初回のみ）</li>
+        <li>給与計算で対象月の給与計算を完了させておく</li>
+        <li>対象年月を選択して、まず「🧪 テスト送信」で自分宛に内容確認</li>
+        <li>問題なければ「✅ 本番送信」で全員に送信</li>
+      </ol>
+      <div style="margin-top:8px">編集は<b>給与計算 → 従業員マスタ</b>の「メールアドレス」欄から。データの二重管理はありません。</div>
     </div>
   </div>
+
+  <!-- PDF 生成用の hidden 領域（html2canvas のキャプチャ対象） -->
+  <div id="psmPdfStage" style="position:fixed;left:-99999px;top:0;width:190mm;background:#fff;color:#000"></div>
 </div>
 
 <!-- ===== フィードバックページ ===== -->
@@ -22073,6 +22118,7 @@ var _psmRefreshTimer = null;
 
 function psmInit(){
   psmReload();
+  psmRefreshConnectionStatus();
   // payroll_v2_employees は親 HTML から見えにくい更新パターン（iframe 経由）で
   // 変わるので、ページ表示中は 2 秒間隔でローカルから再読み込み。
   if(_psmRefreshTimer) clearInterval(_psmRefreshTimer);
@@ -22183,6 +22229,263 @@ function psmJumpToEmployee(id){
 
 function psmRefresh(){
   psmReload();
+  psmRefreshConnectionStatus();
+}
+
+// ============================================================================
+// Gmail 連携 + 一斉送信
+// ============================================================================
+
+function psmRefreshConnectionStatus(){
+  fetch('/api/payslip/status').then(function(r){
+    if(!r.ok) throw new Error('status fetch failed: '+r.status);
+    return r.json();
+  }).then(function(s){
+    var state = document.getElementById('psmConnState');
+    var details = document.getElementById('psmConnDetails');
+    var connectBtn = document.getElementById('psmConnectBtn');
+    var reconnectBtn = document.getElementById('psmReconnectBtn');
+    var sendCard = document.getElementById('psmSendCard');
+    if(!state) return;
+    if(!s.config.has_client_id || !s.config.has_client_secret || !s.config.has_sender){
+      state.textContent = '⚠ サーバー設定が未完了';
+      state.style.color = '#dc2626';
+      details.innerHTML = 'Cloudflare Pages の Secret に未設定の項目があります。<br>'
+        + '<b>必要</b>: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GMAIL_SENDER<br>'
+        + '<span style="color:#8b8ba0">これらは管理者が Cloudflare ダッシュボードで登録します。</span>';
+      connectBtn.style.display = 'none';
+      reconnectBtn.style.display = 'none';
+      sendCard.style.display = 'none';
+      return;
+    }
+    if(!s.connection.connected){
+      state.textContent = '🔗 未連携';
+      state.style.color = '#f59e0b';
+      details.innerHTML = '送信元 Gmail: <b>'+(s.config.sender || '-')+'</b><br>'
+        + '「Google と連携する」を押して Gmail の送信権限を許可してください（1 回だけ）。';
+      connectBtn.style.display = 'inline-block';
+      reconnectBtn.style.display = 'none';
+      sendCard.style.display = 'none';
+      return;
+    }
+    state.textContent = '✅ 連携済み';
+    state.style.color = '#10b981';
+    var at = s.connection.connected_at ? new Date(s.connection.connected_at).toLocaleString('ja-JP') : '-';
+    details.innerHTML = '送信元 Gmail: <b>'+(s.config.sender || '-')+'</b><br>'
+      + '連携日時: '+at+'<br>'
+      + '<span style="color:#8b8ba0">※ OAuth 同意画面が「テスト中」モードの場合、連携の有効期限は 7 日間。期限切れになったら「連携をやり直す」を押してください。</span>';
+    connectBtn.style.display = 'none';
+    reconnectBtn.style.display = 'inline-block';
+    sendCard.style.display = 'block';
+    // 対象年月を当月にプリセット（未入力時）
+    var ymEl = document.getElementById('psmYM');
+    if(ymEl && !ymEl.value){
+      var d = new Date();
+      ymEl.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+  }).catch(function(e){
+    var state = document.getElementById('psmConnState');
+    if(state){
+      state.textContent = '❌ API 接続失敗';
+      state.style.color = '#dc2626';
+    }
+    var details = document.getElementById('psmConnDetails');
+    if(details) details.innerHTML = 'Cloudflare Pages Functions に接続できません。'
+      + '<br><span style="color:#8b8ba0">ローカルで動かす場合は、wrangler pages dev . を使ってください（普通のファイルサーバーでは動きません）。</span>'
+      + '<br><span style="color:#8b8ba0">詳細: '+e.message+'</span>';
+  });
+}
+
+function psmStartOAuth(){
+  // OAuth フローを別タブで開く（ハッシュで戻ってくる）
+  window.location.href = '/api/auth/google/start';
+}
+
+// ハッシュをチェックして連携完了/エラー表示（起動時 1 回）
+function psmCheckHashFlag(){
+  var h = location.hash || '';
+  if(h.indexOf('gmail_connected=1') !== -1){
+    alert('✅ Gmail 連携が完了しました。給与明細送付先ページから一斉送信できます。');
+    // ハッシュをクリア
+    history.replaceState(null, '', location.pathname + location.search);
+  } else if(h.indexOf('gmail_error=') !== -1){
+    var m = h.match(/gmail_error=([^&]+)/);
+    var msg = m ? decodeURIComponent(m[1]) : 'unknown';
+    alert('❌ Gmail 連携に失敗しました: ' + msg);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
+try { psmCheckHashFlag(); } catch(e){ console.warn('[psm] hash check:', e); }
+
+// 1 人ぶんの給与明細 HTML を PDF（base64）に変換
+async function psmRenderPdfBase64(htmlString){
+  if(!window.html2canvas || !window.jspdf){
+    throw new Error('PDF ライブラリが読み込めていません');
+  }
+  var stage = document.getElementById('psmPdfStage');
+  stage.innerHTML = htmlString;
+  // レンダリングが反映されるまで待つ
+  await new Promise(function(r){ setTimeout(r, 30); });
+  var node = stage.firstElementChild || stage;
+  var canvas = await html2canvas(node, {
+    scale: 2,
+    backgroundColor: '#ffffff',
+    useCORS: true,
+    logging: false,
+  });
+  var imgData = canvas.toDataURL('image/jpeg', 0.92);
+  var jsPDF = window.jspdf.jsPDF;
+  var pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  var pdfW = pdf.internal.pageSize.getWidth();
+  var pdfH = pdf.internal.pageSize.getHeight();
+  var margin = 10;
+  var imgRatio = canvas.width / canvas.height;
+  var w = pdfW - margin * 2;
+  var h = w / imgRatio;
+  if (h > pdfH - margin * 2) { h = pdfH - margin * 2; w = h * imgRatio; }
+  pdf.addImage(imgData, 'JPEG', (pdfW - w) / 2, margin, w, h, undefined, 'FAST');
+  // 後始末
+  stage.innerHTML = '';
+  // jsPDF.output('datauristring') → "data:application/pdf;base64,...."
+  var dataUri = pdf.output('datauristring');
+  return dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
+}
+
+// 対象月の給与明細を全員分送信
+async function psmSendMails(isTest){
+  var ymEl = document.getElementById('psmYM');
+  if(!ymEl || !ymEl.value){ alert('対象年月を選んでください'); return; }
+  var ym = ymEl.value;  // 'YYYY-MM'
+  var year = parseInt(ym.slice(0, 4), 10);
+  var month = parseInt(ym.slice(5, 7), 10);
+
+  // 対象スタッフ：メアド登録済みの全員（payroll_v2_employees）
+  var recipients = (_psmEmployees || []).filter(function(e){ return e && e.email; });
+  if(recipients.length === 0){
+    alert('メアド登録済みの従業員がいません。先に「給与計算 → 従業員マスタ」でメアドを登録してください。');
+    return;
+  }
+
+  // 給与計算ページから payroll_v2_records を取得
+  var records;
+  try {
+    var raw = localStorage.getItem('payroll_v2_records');
+    records = raw ? JSON.parse(raw) : [];
+    if(!Array.isArray(records)) records = [];
+  } catch(e){ records = []; }
+
+  // 対象月のレコードを emp ごとに集める
+  var recordsByEmp = {};
+  records.forEach(function(r){
+    if(r && r.month === ym) recordsByEmp[r.empId] = r;
+  });
+
+  // 計算が無いスタッフは対象外
+  var willSend = recipients.filter(function(e){ return recordsByEmp[e.id]; });
+  var noCalc = recipients.filter(function(e){ return !recordsByEmp[e.id]; });
+  if(willSend.length === 0){
+    alert(ym + ' の給与計算が完了している従業員がいません。先に給与計算 → 月次給与計算で計算してください。');
+    return;
+  }
+  var confirmMsg = '対象年月: ' + ym + '\n'
+    + '送信対象: ' + willSend.length + ' 名\n'
+    + (noCalc.length ? '⚠ 計算未済（送信されない）: ' + noCalc.length + ' 名\n' : '')
+    + (isTest ? '【テスト送信】' + (document.getElementById('psmTestTo').value || '宛先未入力') + '\n' : '【本番送信】各従業員のメアドへ\n')
+    + '\n実行してよろしいですか？';
+  if(!confirm(confirmMsg)) return;
+
+  var testTo = null;
+  if(isTest){
+    testTo = (document.getElementById('psmTestTo').value || '').trim();
+    if(!testTo){ alert('テスト送信先メアドを入力してください'); return; }
+  }
+
+  var progress = document.getElementById('psmSendProgress');
+  var resultEl = document.getElementById('psmSendResult');
+  resultEl.style.display = 'none';
+  resultEl.innerHTML = '';
+
+  // generatePayslipHTMLString は p_payroll iframe の中。借りる。
+  var ifr = document.getElementById('p_payroll');
+  var cw = ifr ? ifr.contentWindow : null;
+  if(!cw || typeof cw.generatePayslipHTMLString !== 'function'){
+    // iframe が未ロードならロードしてから再試行
+    if(ifr){ go('payroll'); await new Promise(function(r){ setTimeout(r, 600); }); }
+    var cw2 = ifr ? ifr.contentWindow : null;
+    if(!cw2 || typeof cw2.generatePayslipHTMLString !== 'function'){
+      alert('給与計算ページの読み込みが完了していません。一度給与計算ページを開いてから戻ってきてください。');
+      go('payslip_master');
+      return;
+    }
+    cw = cw2;
+    go('payslip_master');
+    await new Promise(function(r){ setTimeout(r, 100); });
+  }
+
+  // PDF を順次生成
+  var items = [];
+  for(var i = 0; i < willSend.length; i++){
+    var emp = willSend[i];
+    var rec = recordsByEmp[emp.id];
+    progress.textContent = 'PDF 生成中 ' + (i + 1) + ' / ' + willSend.length + '（' + emp.name + '）';
+    try {
+      var html = cw.generatePayslipHTMLString(rec);
+      var base64 = await psmRenderPdfBase64(html);
+      var safeName = (emp.name || ('id' + emp.id)).replace(/[\\\/:*?"<>|\s]/g, '');
+      items.push({
+        staff_id: emp.id,
+        name: emp.name,
+        email: emp.email,
+        pdf_base64: base64,
+        filename: ym + '-' + safeName + '-給与明細.pdf',
+      });
+    } catch(e){
+      console.error('PDF 生成失敗:', emp.name, e);
+      resultEl.innerHTML += '<div style="color:#dc2626">❌ ' + emp.name + ' の PDF 生成失敗: ' + (e.message || e) + '</div>';
+    }
+  }
+
+  if(items.length === 0){
+    progress.textContent = '';
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div style="color:#dc2626">PDF を 1 件も生成できませんでした</div>';
+    return;
+  }
+
+  // /api/payslip/send に POST
+  progress.textContent = 'サーバーに送信中…（' + items.length + ' 件）';
+  var body = { items: items, year: year, month: month };
+  if(testTo) body.test_to = testTo;
+  try {
+    var res = await fetch('/api/payslip/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    var data = await res.json();
+    progress.textContent = '';
+    resultEl.style.display = 'block';
+    if(!res.ok){
+      resultEl.innerHTML = '<div style="color:#dc2626;font-weight:600">❌ 送信失敗: ' + (data.message || data.error || res.status) + '</div>';
+      return;
+    }
+    var sum = data.summary || { sent:0, skipped:0, failed:0 };
+    var html = '<div style="background:#f8f9fc;border:1px solid #e0e2ec;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+      + '<b style="color:#065f46">✅ 送信 ' + sum.sent + ' 件</b>'
+      + ' / <span style="color:#92400e">スキップ ' + sum.skipped + '</span>'
+      + ' / <span style="color:#991b1b">失敗 ' + sum.failed + '</span>'
+      + '</div>';
+    (data.results || []).forEach(function(r){
+      var icon = r.status === 'sent' ? '✅' : (r.status === 'skipped' ? '⏭' : '❌');
+      var color = r.status === 'sent' ? '#065f46' : (r.status === 'skipped' ? '#92400e' : '#991b1b');
+      html += '<div style="color:'+color+';font-size:12px;padding:2px 0">'+icon+' '+r.staff_name+(r.error ? ' — ' + r.error : '')+'</div>';
+    });
+    resultEl.innerHTML = html;
+  } catch(e){
+    progress.textContent = '';
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div style="color:#dc2626">❌ 通信エラー: ' + (e.message || e) + '</div>';
+  }
 }
 // Firebase同期完了を待ってからログイン（最大3秒）
 var _loginReady=false;
