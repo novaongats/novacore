@@ -13106,7 +13106,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.3 - PayCalc Pro</title>
+    <title>給与計算システム v2.4 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -13983,6 +13983,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <div class=&quot;calc-result-header&quot;>計算結果</div>
                         <div class=&quot;calc-grid&quot;>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>総支給額</div><div class=&quot;calc-value&quot; id=&quot;result-gross&quot;>¥0</div></div>
+                            <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>通勤手当（うち非課税）</div><div class=&quot;calc-value&quot; id=&quot;result-commute&quot; style=&quot;font-size:14px;&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>健康保険料</div><div class=&quot;calc-value&quot; id=&quot;result-health&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>厚生年金保険料</div><div class=&quot;calc-value&quot; id=&quot;result-pension&quot;>¥0</div></div>
                             <div class=&quot;calc-item&quot;><div class=&quot;calc-label&quot;>介護保険料</div><div class=&quot;calc-value&quot; id=&quot;result-care&quot;>¥0</div></div>
@@ -14183,6 +14184,44 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         <!-- Tab: 料率設定 -->
         <div id=&quot;tab-rates&quot; class=&quot;tab-content hidden&quot;>
+            <div class=&quot;card&quot;>
+                <div class=&quot;card-header&quot;>📇 会社情報マスタ（明細書に表示）</div>
+                <div class=&quot;info-box info-box-blue&quot;>
+                    💡 給与明細書・賞与明細書に発行者情報として記載されます（労働基準法施行規則第54条の必須項目に相当）
+                </div>
+                <form id=&quot;company-info-form&quot;>
+                    <div class=&quot;form-grid&quot;>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>会社名 ※</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-name&quot; placeholder=&quot;例: 有限会社NOVA&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>代表者名 ※</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-rep&quot; placeholder=&quot;例: 代表取締役 鈴木 篤&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>所在地</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-address&quot; placeholder=&quot;例: 東京都新宿区...&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>電話番号</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-phone&quot; placeholder=&quot;例: 03-1234-5678&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>給与支給日 ※</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-payday&quot; placeholder=&quot;例: 当月25日 / 翌月10日&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>賃金計算期間 ※</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-payperiod&quot; placeholder=&quot;例: 当月1日〜当月末日 / 前月21日〜当月20日&quot;>
+                        </div>
+                    </div>
+                    <div class=&quot;btn-group&quot;>
+                        <button type=&quot;submit&quot; class=&quot;btn btn-primary&quot;>保存</button>
+                    </div>
+                </form>
+            </div>
+
             <div class=&quot;card&quot;>
                 <div class=&quot;card-header&quot;>雇用保険料率設定</div>
                 <div class=&quot;info-box info-box-blue&quot;>
@@ -14803,6 +14842,17 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         let yearEndData = [];
         let notifications = [];
         let bankAccounts = {}; // { empId: { bankName, branchName, accountType, accountNumber, accountHolder } }
+        // 会社情報マスタ（明細書の発行者情報、給与支払報告書等で使用）
+        let companyInfo = {
+            name:          '有限会社NOVA',
+            representative:'代表取締役 鈴木 篤',
+            address:       '',
+            phone:         '',
+            // 月次給与の通常支給日（例: 当月25日、翌月10日等）
+            payDay:        '当月25日',
+            // 賃金計算期間（締日）。例: '前月21日〜当月20日'
+            payPeriod:     '当月1日〜当月末日',
+        };
         const empTypeGuides = {
             regular: {
                 name: '正社員',
@@ -15091,6 +15141,34 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 });
             });
         }
+        // ============================================================
+        // 最低賃金（地域別最低賃金、2024年10月～）
+        // 出典: 厚生労働省 地域別最低賃金一覧
+        // ※毎年10月頃に改定される。次回更新時はこの定数を見直すこと。
+        // ============================================================
+        const MINIMUM_WAGE_BY_PREF_2024 = {
+            tokyo:    1163,
+            kanagawa: 1162,
+            aichi:    1140,
+            gifu:     1054,
+        };
+
+        /**
+         * 時給が地域別最低賃金を下回っていないかチェック。
+         * 下回っている場合は alert で警告（業務継続は妨げない）。
+         */
+        function checkMinimumWage(hourlyWage, prefecture, empName) {
+            const min = MINIMUM_WAGE_BY_PREF_2024[prefecture];
+            if (!min || !hourlyWage) return;
+            if (hourlyWage < min) {
+                alert(`⚠️ 最低賃金違反の可能性\n\n` +
+                    `${empName}さんの時給 ¥${hourlyWage} は、\n` +
+                    `${prefecture}の地域別最低賃金 ¥${min}(2024年10月～) を下回っています。\n\n` +
+                    `労働基準監督署への是正勧告対象になる可能性があります。\n` +
+                    `時給を見直してください。`);
+            }
+        }
+
         function getAgeMilestoneMessage(milestone) {
             switch (milestone) {
                 case 40: return '介護保険料の徴収を開始してください（emp-care-check を ON）';
@@ -15204,7 +15282,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             loadData();
             initDefaultRates();
             initDefaultHealthRates();
-            migrateHealthRatesIfStale(); // 旧年度の料率を令和8年度へ自動移行
+            migrateHealthRatesIfStale();      // 旧年度の料率を令和8年度へ自動移行
+            migrateInsuranceAmountsIfNeeded(); // 既存従業員の社保額を新料率で再計算
             updateAllTables();
             updateCurrentRateDisplay();
             updateHealthRatesDisplay();
@@ -15224,7 +15303,34 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('rates-form').addEventListener('submit', handleRatesSubmit);
             document.getElementById('health-rates-form').addEventListener('submit', handleHealthRatesSubmit);
             document.getElementById('bank-account-form').addEventListener('submit', handleBankAccountSubmit);
+            const ciForm = document.getElementById('company-info-form');
+            if (ciForm) ciForm.addEventListener('submit', handleCompanyInfoSubmit);
+            updateCompanyInfoForm();
         });
+
+        function updateCompanyInfoForm() {
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+            set('company-name',      companyInfo.name);
+            set('company-rep',       companyInfo.representative);
+            set('company-address',   companyInfo.address);
+            set('company-phone',     companyInfo.phone);
+            set('company-payday',    companyInfo.payDay);
+            set('company-payperiod', companyInfo.payPeriod);
+        }
+
+        function handleCompanyInfoSubmit(e) {
+            e.preventDefault();
+            companyInfo = {
+                name:           document.getElementById('company-name').value.trim(),
+                representative: document.getElementById('company-rep').value.trim(),
+                address:        document.getElementById('company-address').value.trim(),
+                phone:          document.getElementById('company-phone').value.trim(),
+                payDay:         document.getElementById('company-payday').value.trim(),
+                payPeriod:      document.getElementById('company-payperiod').value.trim(),
+            };
+            saveData('companyInfo');
+            alert('会社情報を保存しました（明細書・賞与明細書に反映されます）');
+        }
         function switchTab(tab, ev) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
             document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -15607,10 +15713,12 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const rates = getCurrentRates(month);
             if (!rates) { alert('雇用保険料率が設定されていません'); return; }
 
-            let basePay = 0, commission = 0;
+            let basePay = 0, commission = 0, workHours = 0;
             if (emp.salary === 'hourly') {
-                const hours = parseFloat(document.getElementById('calc-hours').value) || 0;
-                basePay = emp.hourlyWage * hours;
+                workHours = parseFloat(document.getElementById('calc-hours').value) || 0;
+                basePay = Math.floor(emp.hourlyWage * workHours);
+                // 最低賃金チェック（都道府県別、時給制のみ）
+                checkMinimumWage(emp.hourlyWage, emp.prefecture || 'tokyo', emp.name);
             } else {
                 basePay = emp.monthlySalary;
                 commission = parseInt(document.getElementById('calc-commission').value) || 0;
@@ -15650,6 +15758,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             currentCalculation = {
                 month, empId, empName: emp.name, empType: emp.type,
                 basePay, commission, allowance, deduction,
+                workHours,
+                hourlyWage: emp.salary === 'hourly' ? emp.hourlyWage : 0,
                 commuteTotal: commute.total, commuteNonTaxable, commuteTaxable,
                 grossSalary, taxableGross,
                 health, pension, care, childSupport, employment,
@@ -15669,6 +15779,12 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         function displayCalculationResults() {
             document.getElementById('calculation-result').classList.remove('hidden');
             document.getElementById('result-gross').textContent = formatCurrency(currentCalculation.grossSalary);
+            const commuteEl = document.getElementById('result-commute');
+            if (commuteEl) {
+                const total = currentCalculation.commuteTotal || 0;
+                const nonTaxable = currentCalculation.commuteNonTaxable || 0;
+                commuteEl.innerHTML = `${formatCurrency(total)}<br><span style=&quot;font-size:11px;opacity:0.85;&quot;>非課税 ${formatCurrency(nonTaxable)}</span>`;
+            }
             document.getElementById('result-health').textContent = formatCurrency(currentCalculation.health);
             document.getElementById('result-pension').textContent = formatCurrency(currentCalculation.pension);
             document.getElementById('result-care').textContent = formatCurrency(currentCalculation.care);
@@ -16030,21 +16146,42 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         function generatePayslipHTMLString(data) {
+            // 時給制従業員の労働時間・労働日数（任意表示）
+            const emp = employees.find(e => e.id === data.empId);
+            const isHourly = emp &amp;&amp; emp.salary === 'hourly';
+            const workHours = data.workHours || emp?.baseHours || 0;
             return `
                 <div style=&quot;max-width: 180mm; margin: 0 auto; padding: 0; background: white !important; color: #000 !important; font-family: sans-serif; page-break-after: always; overflow: visible !important; height: auto !important;&quot;>
-                    <div style=&quot;text-align:center; padding-bottom:12px; margin-bottom:20px; border-bottom: 3px solid #000;&quot;>
+                    <div style=&quot;text-align:center; padding-bottom:12px; margin-bottom:14px; border-bottom: 3px solid #000;&quot;>
                         <div style=&quot;font-size:22px; font-weight:700; letter-spacing: 2px; color: #000;&quot;>給与明細書</div>
                         <div style=&quot;font-size:12px; margin-top:6px; color:#000;&quot;>${data.month} 分</div>
                     </div>
-                    
-                    <div style=&quot;display:flex; justify-content:space-between; margin-bottom:20px; font-size:10px; padding: 10px; background:#f5f5f5 !important; border-left: 4px solid #000;&quot;>
+
+                    <!-- 発行者（会社情報）-->
+                    <div style=&quot;display:flex; justify-content:space-between; margin-bottom:14px; font-size:10px; color:#000;&quot;>
+                        <div>
+                            <div style=&quot;font-size:13px; font-weight:700;&quot;>${escapeHtml(companyInfo.name) || ''}</div>
+                            <div>${escapeHtml(companyInfo.representative) || ''}</div>
+                            ${companyInfo.address ? `<div style=&quot;font-size:9px; color:#444;&quot;>${escapeHtml(companyInfo.address)}</div>` : ''}
+                            ${companyInfo.phone ? `<div style=&quot;font-size:9px; color:#444;&quot;>TEL: ${escapeHtml(companyInfo.phone)}</div>` : ''}
+                        </div>
+                        <div style=&quot;text-align:right;&quot;>
+                            <div>発行日: ${new Date().toLocaleDateString('ja-JP')}</div>
+                            ${companyInfo.payDay   ? `<div>支給日: ${escapeHtml(companyInfo.payDay)}</div>` : ''}
+                            ${companyInfo.payPeriod? `<div>賃金計算期間: ${escapeHtml(companyInfo.payPeriod)}</div>` : ''}
+                        </div>
+                    </div>
+
+                    <!-- 従業員情報 -->
+                    <div style=&quot;display:flex; justify-content:space-between; margin-bottom:14px; font-size:10px; padding: 10px; background:#f5f5f5 !important; border-left: 4px solid #000;&quot;>
                         <div>
                             <div style=&quot;margin-bottom:5px;&quot;><span style=&quot;color:#000;&quot;>従業員ID:</span> <strong>${data.empId}</strong></div>
-                            <div><span style=&quot;color:#000;&quot;>氏名:</span> <strong style=&quot;font-size:13px;&quot;>${data.empName}</strong></div>
+                            <div><span style=&quot;color:#000;&quot;>氏名:</span> <strong style=&quot;font-size:13px;&quot;>${escapeHtml(data.empName)}</strong> 殿</div>
                         </div>
-                        <div style=&quot;text-align:right; color:#000;&quot;>
-                            <span>発行日:</span> ${new Date().toLocaleDateString('ja-JP')}
-                        </div>
+                        ${isHourly ? `<div style=&quot;text-align:right; color:#000;&quot;>
+                            <div>労働時間: <strong>${workHours} 時間</strong></div>
+                            <div style=&quot;font-size:9px; color:#444;&quot;>時給 ${formatCurrency(emp.hourlyWage)}</div>
+                        </div>` : ''}
                     </div>
                     
                     <div style=&quot;margin-bottom:15px;&quot;>
@@ -16052,7 +16189,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <table style=&quot;width:100%; border-collapse:collapse; font-size:10px;&quot;>
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:8px 10px; color:#000;&quot;>基本給</td><td style=&quot;padding:8px 10px; text-align:right; font-weight:600; color:#000;&quot;>${formatCurrency(data.basePay)}</td></tr>
                             ${data.commission ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:8px 10px; color:#000;&quot;>歩合給</td><td style=&quot;padding:8px 10px; text-align:right; font-weight:600; color:#000;&quot;>${formatCurrency(data.commission)}</td></tr>` : ''}
-                            <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:8px 10px; color:#000;&quot;>諸手当</td><td style=&quot;padding:8px 10px; text-align:right; font-weight:600; color:#000;&quot;>${formatCurrency(data.allowance)}</td></tr>
+                            ${data.allowance > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:8px 10px; color:#000;&quot;>諸手当</td><td style=&quot;padding:8px 10px; text-align:right; font-weight:600; color:#000;&quot;>${formatCurrency(data.allowance)}</td></tr>` : ''}
+                            ${(data.commuteTotal || 0) > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:8px 10px; color:#000;&quot;>通勤手当<span style=&quot;font-size:9px;color:#666;&quot;>（うち非課税 ${formatCurrency(data.commuteNonTaxable || 0)}）</span></td><td style=&quot;padding:8px 10px; text-align:right; font-weight:600; color:#000;&quot;>${formatCurrency(data.commuteTotal)}</td></tr>` : ''}
                             ${data.deduction > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:8px 10px; color:#000;&quot;>控除（欠勤等）</td><td style=&quot;padding:8px 10px; text-align:right; font-weight:600; color:#000;&quot;>-${formatCurrency(data.deduction)}</td></tr>` : ''}
                             <tr style=&quot;background:#e8e8e8 !important; font-weight:700;&quot;><td style=&quot;padding:10px; border-top:2px solid #000; color:#000;&quot;>総支給額</td><td style=&quot;padding:10px; text-align:right; font-size:12px; border-top:2px solid #000; color:#000;&quot;>${formatCurrency(data.grossSalary)}</td></tr>
                         </table>
@@ -16064,7 +16202,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>健康保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.health)}</td></tr>
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>厚生年金保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.pension)}</td></tr>
                             ${data.care > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>介護保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.care)}</td></tr>` : ''}
-                            ${(data.childSupport || 0) > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>子ども・子育て支援金</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.childSupport)}</td></tr>` : ''}
+                            ${((data.month &amp;&amp; data.month >= '2026-04') || (data.childSupport || 0) > 0) ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>子ども・子育て支援金</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.childSupport || 0)}</td></tr>` : ''}
                             ${data.employment > 0 ? `<tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>雇用保険料</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.employment)}</td></tr>` : ''}
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>所得税</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.incomeTax)}</td></tr>
                             <tr style=&quot;border-bottom:1px solid #000;&quot;><td style=&quot;padding:7px 10px; color:#000;&quot;>住民税</td><td style=&quot;padding:7px 10px; text-align:right; color:#000;&quot;>${formatCurrency(data.residentTax)}</td></tr>
@@ -16234,6 +16372,79 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         /**
+         * 既存従業員の標準報酬月額を、現行の healthAmount から逆算する。
+         * 健保料率は旧年度（FY2024/FY2025）を試行し、料額表と完全一致する標準額を返す。
+         * @returns {number} 標準報酬月額。推定不能なら 0
+         */
+        function inferStandardRemuneration(emp) {
+            if (!emp || !emp.healthCheck) return 0;
+            if (!emp.healthAmount || emp.healthAmount <= 0) return 0;
+            const pref = emp.prefecture || 'tokyo';
+            const oldRates = [
+                HEALTH_RATES_FY2026[pref],
+                HEALTH_RATES_FY2025[pref],
+                HEALTH_RATES_FY2024[pref],
+            ].filter(r => r);
+            // 試行: 各料率 × 各標準額で healthAmount に一致するかチェック
+            for (const oldRate of oldRates) {
+                for (const row of stdRemunerationTable) {
+                    const computed = roundShakai(row.standard * oldRate / 100 / 2);
+                    if (computed === emp.healthAmount) return row.standard;
+                }
+            }
+            // フォールバック: 現行料率で逆算し、料額表の最近接値を返す
+            const hr = getHealthRate(pref);
+            const approxStd = emp.healthAmount * 200 / hr;
+            let best = stdRemunerationTable[0];
+            for (const row of stdRemunerationTable) {
+                if (Math.abs(row.standard - approxStd) < Math.abs(best.standard - approxStd)) {
+                    best = row;
+                }
+            }
+            return best.standard;
+        }
+
+        /**
+         * 既存従業員の社会保険料を、現行料率で一括再計算する。
+         * - 標準報酬月額が emp.standardRemuneration に保存されていればそれを使う
+         * - なければ healthAmount から逆算（旧料率と料額表でマッチング）
+         * - 健保・年金・介護・支援金 をすべて roundShakai で再計算
+         * `payroll_v2_migration_recalc_v23_done` フラグで起動時1回のみ実行
+         */
+        function migrateInsuranceAmountsIfNeeded() {
+            const FLAG = 'payroll_v2_migration_recalc_v23';
+            if (localStorage.getItem(FLAG) === 'done') return;
+            let updated = 0;
+            const updatedNames = [];
+            employees.forEach(emp => {
+                if (!emp || !emp.healthCheck) return;
+                const std = emp.standardRemuneration || inferStandardRemuneration(emp);
+                if (!std) return;
+                emp.standardRemuneration = std;
+                const pref = emp.prefecture || 'tokyo';
+                const hr = getHealthRate(pref);
+                const pensionStd = Math.min(std, PENSION_MAX_STANDARD);
+                emp.healthAmount       = roundShakai(std * hr / 100 / 2);
+                emp.pensionAmount      = emp.pensionCheck ? roundShakai(pensionStd * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0;
+                emp.careAmount         = emp.careCheck    ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
+                emp.childSupportAmount = roundShakai(std * PAYROLL_CONSTANTS.childSupportRate / 100 / 2);
+                updated++;
+                updatedNames.push(emp.name);
+            });
+            if (updated > 0) {
+                saveData('employees');
+                notifications.push({
+                    type: 'info',
+                    icon: '🔄',
+                    title: `${updated}名の社会保険料を令和8年度料率で再計算しました`,
+                    message: `${updatedNames.slice(0, 5).join(', ')}${updatedNames.length > 5 ? ' 他' : ''}：健保・年金・介護・子育て支援金を最新料率で更新（標準報酬月額は維持）`,
+                    action: () => switchTab('employees'),
+                });
+            }
+            localStorage.setItem(FLAG, 'done');
+        }
+
+        /**
          * 健康保険料率の自動マイグレーション。
          * 既存料率が「旧年度の初期値そのまま」だった場合、令和8年度の値に自動更新。
          * 手動カスタム値（旧年度の初期値と完全一致しない）の場合は触らない。
@@ -16370,13 +16581,28 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         function generateBonusSlipHTML(data) {
             document.getElementById('bonus-slip-content').innerHTML = `
-                <div style=&quot;text-align:center;border-bottom:2px solid var(--primary);padding-bottom:15px;margin-bottom:20px;&quot;>
+                <div style=&quot;text-align:center;border-bottom:2px solid var(--primary);padding-bottom:15px;margin-bottom:14px;&quot;>
                     <div style=&quot;font-size:20px;font-weight:700;color:var(--primary);&quot;>賞与明細書</div>
                     <div style=&quot;font-size:12px;color:#8b8ba0;margin-top:5px;&quot;>${data.month} 分</div>
                 </div>
-                <div style=&quot;display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px;font-size:11px;&quot;>
-                    <div><strong>従業員ID:</strong> ${data.empId}<br><strong>氏名:</strong> ${data.empName}</div>
-                    <div style=&quot;text-align:right;&quot;><strong>発行日:</strong> ${new Date().toLocaleDateString('ja-JP')}</div>
+                <!-- 発行者（会社情報）-->
+                <div style=&quot;display:flex;justify-content:space-between;margin-bottom:14px;font-size:10px;color:#000;&quot;>
+                    <div>
+                        <div style=&quot;font-size:13px;font-weight:700;&quot;>${escapeHtml(companyInfo.name) || ''}</div>
+                        <div>${escapeHtml(companyInfo.representative) || ''}</div>
+                        ${companyInfo.address ? `<div style=&quot;font-size:9px;color:#444;&quot;>${escapeHtml(companyInfo.address)}</div>` : ''}
+                    </div>
+                    <div style=&quot;text-align:right;&quot;>
+                        <div>発行日: ${new Date().toLocaleDateString('ja-JP')}</div>
+                        ${companyInfo.payDay ? `<div>支給日: ${escapeHtml(companyInfo.payDay)}</div>` : ''}
+                    </div>
+                </div>
+                <!-- 従業員情報 -->
+                <div style=&quot;display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:14px;font-size:11px;padding:8px;background:#f5f5f5;border-left:4px solid var(--primary);&quot;>
+                    <div><strong>従業員ID:</strong> ${data.empId}<br><strong>氏名:</strong> ${escapeHtml(data.empName)} 殿</div>
+                    <div style=&quot;text-align:right;&quot;>
+                        ${data.bonusStd ? `<div><span style=&quot;font-size:9px;color:#666;&quot;>標準賞与額:</span> ${formatCurrency(data.bonusStd)}</div>` : ''}
+                    </div>
                 </div>
                 <table style=&quot;width:100%;border-collapse:collapse;margin-bottom:15px;font-size:10px;&quot;>
                     <tbody>
@@ -16389,7 +16615,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>健康保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.health)}</td></tr>
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>厚生年金保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.pension)}</td></tr>
                         ${data.care > 0 ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>介護保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.care)}</td></tr>` : ''}
-                        ${(data.childSupport || 0) > 0 ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>子ども・子育て支援金</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.childSupport)}</td></tr>` : ''}
+                        ${((data.month &amp;&amp; data.month >= '2026-04') || (data.childSupport || 0) > 0) ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>子ども・子育て支援金</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.childSupport || 0)}</td></tr>` : ''}
                         ${data.employment > 0 ? `<tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>雇用保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.employment)}</td></tr>` : ''}
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>所得税</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.incomeTax)}</td></tr>
                         <tr style=&quot;background:#eaecf3;font-weight:bold;&quot;><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>控除合計</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.totalDed)}</td></tr>
@@ -16442,6 +16668,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 rates:        () => localStorage.setItem('payroll_v2_rates',        JSON.stringify(insuranceRates)),
                 healthRates:  () => localStorage.setItem('payroll_v2_health_rates', JSON.stringify(healthRates)),
                 bankAccounts: () => localStorage.setItem('payroll_v2_bank_accounts',JSON.stringify(bankAccounts)),
+                companyInfo:  () => localStorage.setItem('payroll_v2_company_info', JSON.stringify(companyInfo)),
             };
             const targets = keys.length ? keys : Object.keys(writers);
             for (const k of targets) {
@@ -16457,12 +16684,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const rt = localStorage.getItem('payroll_v2_rates');
             const hr = localStorage.getItem('payroll_v2_health_rates');
             const ba = localStorage.getItem('payroll_v2_bank_accounts');
+            const ci = localStorage.getItem('payroll_v2_company_info');
             if (e) employees = JSON.parse(e);
             if (r) payrollRecords = JSON.parse(r);
             if (b) bonusRecords = JSON.parse(b);
             if (rt) insuranceRates = JSON.parse(rt);
             if (hr) healthRates = JSON.parse(hr);
             if (ba) bankAccounts = JSON.parse(ba);
+            if (ci) { try { companyInfo = { ...companyInfo, ...JSON.parse(ci) }; } catch (e) {} }
         }
 
         function updateAllTables() {
