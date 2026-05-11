@@ -1,3 +1,15 @@
 name = "novacore-app"
 compatibility_date = "2026-03-02"
 pages_build_output_dir = "."
+
+# KV namespace for Gmail OAuth refresh_token & state.
+# 本番デプロイ前に下記コマンドで namespace を作成し、出力された ID を id と preview_id に貼ること:
+#   npx wrangler kv namespace create NOVA_KV
+#   npx wrangler kv namespace create NOVA_KV --preview
+#
+# ローカル開発時は `wrangler pages dev . --kv NOVA_KV` でエミュレーションされるので、
+# 下記の id/preview_id は本番デプロイ時のみ必須（仮値だとデプロイ時に警告が出る）。
+[[kv_namespaces]]
+binding = "NOVA_KV"
+id = "41a025391d7b425b9c01aa7c729fa413"
+preview_id = "f4e5a67621bb4672ad741c968d731f61"
