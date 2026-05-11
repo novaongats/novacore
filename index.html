@@ -13106,7 +13106,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.2 - PayCalc Pro</title>
+    <title>給与計算システム v2.3 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -13785,6 +13785,11 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <input type=&quot;number&quot; class=&quot;form-input&quot; id=&quot;emp-dependents&quot; value=&quot;0&quot; min=&quot;0&quot;>
                         </div>
                         <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>生年月日</label>
+                            <input type=&quot;date&quot; class=&quot;form-input&quot; id=&quot;emp-birth-date&quot;>
+                            <small style=&quot;color: #64748b;&quot;>※40/65/70/75歳到達時の保険料切替に使用</small>
+                        </div>
+                        <div class=&quot;form-group&quot;>
                             <label class=&quot;form-label&quot;>従業員ID（自動生成）</label>
                             <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;emp-id&quot; readonly style=&quot;background-color: #f3f4f6; cursor: not-allowed;&quot;>
                             <small style=&quot;color: #64748b;&quot;>※雇用形態を選択すると自動生成されます</small>
@@ -13875,6 +13880,40 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <div class=&quot;form-checkbox&quot;>
                             <input type=&quot;checkbox&quot; id=&quot;emp-employment-check&quot;>
                             <label>雇用保険加入</label>
+                        </div>
+                    </div>
+
+                    <h3 style=&quot;margin: 20px 0 10px 0; font-size: 16px; color: var(--primary);&quot;>休業ステータス（社会保険料免除）</h3>
+                    <div class=&quot;info-box info-box-yellow&quot;>
+                        💡 産前産後休業・育児休業中は、本人・会社負担とも社会保険料が法令免除されます（雇用保険料は別途運用）
+                    </div>
+                    <div class=&quot;form-grid&quot;>
+                        <div class=&quot;form-checkbox&quot;>
+                            <input type=&quot;checkbox&quot; id=&quot;emp-maternity-leave&quot;>
+                            <label>産前産後休業中（社保免除）</label>
+                        </div>
+                        <div class=&quot;form-checkbox&quot;>
+                            <input type=&quot;checkbox&quot; id=&quot;emp-childcare-leave&quot;>
+                            <label>育児休業中（社保免除）</label>
+                        </div>
+                    </div>
+
+                    <h3 style=&quot;margin: 20px 0 10px 0; font-size: 16px; color: var(--primary);&quot;>通勤手当（非課税限度額の自動判定）</h3>
+                    <div class=&quot;info-box info-box-blue&quot;>
+                        💡 公共交通機関: 月15万円まで非課税 / マイカー: 距離別非課税限度額
+                    </div>
+                    <div class=&quot;form-grid&quot;>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>通勤手段</label>
+                            <select class=&quot;form-select&quot; id=&quot;emp-commute-type&quot;>
+                                <option value=&quot;public&quot;>公共交通機関（電車・バス）</option>
+                                <option value=&quot;car&quot;>マイカー・自転車</option>
+                            </select>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>通勤手当（月額）円</label>
+                            <input type=&quot;number&quot; class=&quot;form-input&quot; id=&quot;emp-commute-monthly&quot; value=&quot;0&quot;>
+                            <small style=&quot;color: #64748b;&quot;>※「諸手当」とは別管理。非課税枠を自動適用</small>
                         </div>
                     </div>
                     <div class=&quot;btn-group&quot;>
@@ -14802,45 +14841,91 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 insurance: { health: false, pension: false, employment: false }
             }
         };
+        // 健康保険標準報酬月額表（全50等級）
+        // 厚生年金は1-32等級のみ適用（上限65万円）。それ以上は健保のみ。
+        // 出典: 協会けんぽ 保険料額表
         const stdRemunerationTable = [
-            { grade: 1, min: 0, max: 63000, standard: 58000 },
-            { grade: 2, min: 63000, max: 73000, standard: 68000 },
-            { grade: 3, min: 73000, max: 83000, standard: 78000 },
-            { grade: 4, min: 83000, max: 93000, standard: 88000 },
-            { grade: 5, min: 93000, max: 101000, standard: 98000 },
-            { grade: 6, min: 101000, max: 107000, standard: 104000 },
-            { grade: 7, min: 107000, max: 114000, standard: 110000 },
-            { grade: 8, min: 114000, max: 122000, standard: 118000 },
-            { grade: 9, min: 122000, max: 130000, standard: 126000 },
-            { grade: 10, min: 130000, max: 138000, standard: 134000 },
-            { grade: 11, min: 138000, max: 146000, standard: 142000 },
-            { grade: 12, min: 146000, max: 155000, standard: 150000 },
-            { grade: 13, min: 155000, max: 165000, standard: 160000 },
-            { grade: 14, min: 165000, max: 175000, standard: 170000 },
-            { grade: 15, min: 175000, max: 185000, standard: 180000 },
-            { grade: 16, min: 185000, max: 195000, standard: 190000 },
-            { grade: 17, min: 195000, max: 210000, standard: 200000 },
-            { grade: 18, min: 210000, max: 230000, standard: 220000 },
-            { grade: 19, min: 230000, max: 250000, standard: 240000 },
-            { grade: 20, min: 250000, max: 270000, standard: 260000 },
-            { grade: 21, min: 270000, max: 290000, standard: 280000 },
-            { grade: 22, min: 290000, max: 310000, standard: 300000 },
-            { grade: 23, min: 310000, max: 330000, standard: 320000 },
-            { grade: 24, min: 330000, max: 350000, standard: 340000 },
-            { grade: 25, min: 350000, max: 370000, standard: 360000 },
-            { grade: 26, min: 370000, max: 395000, standard: 380000 },
-            { grade: 27, min: 395000, max: 425000, standard: 410000 },
-            { grade: 28, min: 425000, max: 455000, standard: 440000 },
-            { grade: 29, min: 455000, max: 485000, standard: 470000 },
-            { grade: 30, min: 485000, max: 515000, standard: 500000 },
-            { grade: 31, min: 515000, max: 99999999, standard: 530000 }
+            { grade:  1, min:       0, max:   63000, standard:   58000 },
+            { grade:  2, min:   63000, max:   73000, standard:   68000 },
+            { grade:  3, min:   73000, max:   83000, standard:   78000 },
+            { grade:  4, min:   83000, max:   93000, standard:   88000 },
+            { grade:  5, min:   93000, max:  101000, standard:   98000 },
+            { grade:  6, min:  101000, max:  107000, standard:  104000 },
+            { grade:  7, min:  107000, max:  114000, standard:  110000 },
+            { grade:  8, min:  114000, max:  122000, standard:  118000 },
+            { grade:  9, min:  122000, max:  130000, standard:  126000 },
+            { grade: 10, min:  130000, max:  138000, standard:  134000 },
+            { grade: 11, min:  138000, max:  146000, standard:  142000 },
+            { grade: 12, min:  146000, max:  155000, standard:  150000 },
+            { grade: 13, min:  155000, max:  165000, standard:  160000 },
+            { grade: 14, min:  165000, max:  175000, standard:  170000 },
+            { grade: 15, min:  175000, max:  185000, standard:  180000 },
+            { grade: 16, min:  185000, max:  195000, standard:  190000 },
+            { grade: 17, min:  195000, max:  210000, standard:  200000 },
+            { grade: 18, min:  210000, max:  230000, standard:  220000 },
+            { grade: 19, min:  230000, max:  250000, standard:  240000 },
+            { grade: 20, min:  250000, max:  270000, standard:  260000 },
+            { grade: 21, min:  270000, max:  290000, standard:  280000 },
+            { grade: 22, min:  290000, max:  310000, standard:  300000 },
+            { grade: 23, min:  310000, max:  330000, standard:  320000 },
+            { grade: 24, min:  330000, max:  350000, standard:  340000 },
+            { grade: 25, min:  350000, max:  370000, standard:  360000 },
+            { grade: 26, min:  370000, max:  395000, standard:  380000 },
+            { grade: 27, min:  395000, max:  425000, standard:  410000 },
+            { grade: 28, min:  425000, max:  455000, standard:  440000 },
+            { grade: 29, min:  455000, max:  485000, standard:  470000 },
+            { grade: 30, min:  485000, max:  515000, standard:  500000 },
+            { grade: 31, min:  515000, max:  545000, standard:  530000 },
+            { grade: 32, min:  545000, max:  575000, standard:  560000 }, // 厚生年金の上限等級
+            { grade: 33, min:  575000, max:  605000, standard:  590000 },
+            { grade: 34, min:  605000, max:  635000, standard:  620000 },
+            { grade: 35, min:  635000, max:  665000, standard:  650000 },
+            { grade: 36, min:  665000, max:  695000, standard:  680000 },
+            { grade: 37, min:  695000, max:  730000, standard:  710000 },
+            { grade: 38, min:  730000, max:  770000, standard:  750000 },
+            { grade: 39, min:  770000, max:  810000, standard:  790000 },
+            { grade: 40, min:  810000, max:  855000, standard:  830000 },
+            { grade: 41, min:  855000, max:  905000, standard:  880000 },
+            { grade: 42, min:  905000, max:  955000, standard:  930000 },
+            { grade: 43, min:  955000, max: 1005000, standard:  980000 },
+            { grade: 44, min: 1005000, max: 1055000, standard: 1030000 },
+            { grade: 45, min: 1055000, max: 1115000, standard: 1090000 },
+            { grade: 46, min: 1115000, max: 1175000, standard: 1150000 },
+            { grade: 47, min: 1175000, max: 1235000, standard: 1210000 },
+            { grade: 48, min: 1235000, max: 1295000, standard: 1270000 },
+            { grade: 49, min: 1295000, max: 1355000, standard: 1330000 },
+            { grade: 50, min: 1355000, max: 99999999, standard: 1390000 }, // 健保の上限等級
         ];
 
+        // 厚生年金の標準報酬月額は1-32等級まで（最高 65万円）。
+        // 健保は1-50等級まで（最高 139万円）。
+        const PENSION_MAX_GRADE = 32;
+        const PENSION_MAX_STANDARD = 650000;
+
+        /**
+         * 健康保険用の標準報酬月額（1-50等級）。
+         */
         function getStandardRemuneration(avg) {
             for (let row of stdRemunerationTable) {
                 if (avg >= row.min &amp;&amp; avg < row.max) return row.standard;
             }
-            return 530000;
+            return 1390000; // 上限（健保50等級）
+        }
+
+        /**
+         * 厚生年金用の標準報酬月額（1-32等級、上限65万円）。
+         */
+        function getPensionStandardRemuneration(avg) {
+            const std = getStandardRemuneration(avg);
+            return Math.min(std, PENSION_MAX_STANDARD);
+        }
+
+        /**
+         * 標準報酬月額から「等級番号」を逆引きする（月変判定で使用）。
+         */
+        function getGradeFromStandard(standard) {
+            const row = stdRemunerationTable.find(r => r.standard === standard);
+            return row ? row.grade : null;
         }
 
         // ============================================================
@@ -14907,6 +14992,196 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             return (healthRates &amp;&amp; healthRates[pref]) || PAYROLL_CONSTANTS.defaultHealthRate;
         }
 
+        // ============================================================
+        // 年齢ベース処理 (40/65/70/75歳到達による保険料切替)
+        // ============================================================
+
+        /**
+         * 指定月時点での年齢を返す。誕生日未登録時は null。
+         * @param {string} birthDate YYYY-MM-DD
+         * @param {string} asOf YYYY-MM (省略時は当月)
+         */
+        function getAgeAt(birthDate, asOf) {
+            if (!birthDate) return null;
+            const bd = new Date(birthDate);
+            if (isNaN(bd.getTime())) return null;
+            const ref = asOf
+                ? new Date(asOf + '-15') // 月の中央で評価
+                : new Date();
+            let age = ref.getFullYear() - bd.getFullYear();
+            const m = ref.getMonth() - bd.getMonth();
+            if (m < 0 || (m === 0 &amp;&amp; ref.getDate() < bd.getDate())) age--;
+            return age;
+        }
+
+        /**
+         * 指定月時点での「給与計算上の保険適用状況」を返す。
+         * 法令ルール:
+         *   - 介護保険: 40歳到達月～65歳到達月の前月まで（健保加入者のみ）
+         *   - 厚生年金: 70歳到達月の前月まで（70歳以降は被保険者資格喪失）
+         *   - 健康保険: 75歳到達月の前月まで（後期高齢者医療制度へ）
+         * @returns {{health, pension, care, childSupport, employment, notes}}
+         */
+        function getInsuranceStatusAtMonth(emp, month) {
+            const age = getAgeAt(emp.birthDate, month);
+            // 誕生日未登録の場合は従業員マスタの手動チェックを尊重
+            if (age === null) {
+                return {
+                    health:       !!emp.healthCheck,
+                    pension:      !!emp.pensionCheck,
+                    care:         !!emp.careCheck,
+                    childSupport: !!emp.healthCheck,
+                    employment:   !!emp.employmentCheck,
+                    notes: '（誕生日未登録のため手動設定値を使用）',
+                };
+            }
+            const notes = [];
+            // 75歳: 健康保険喪失
+            const health = !!emp.healthCheck &amp;&amp; age < 75;
+            if (emp.healthCheck &amp;&amp; age >= 75) notes.push('75歳到達のため健康保険喪失（後期高齢者医療制度へ）');
+            // 70歳: 厚生年金喪失
+            const pension = !!emp.pensionCheck &amp;&amp; age < 70;
+            if (emp.pensionCheck &amp;&amp; age >= 70) notes.push('70歳到達のため厚生年金資格喪失');
+            // 介護保険: 40歳～64歳（健保加入が前提）
+            const care = health &amp;&amp; age >= 40 &amp;&amp; age < 65;
+            if (age >= 40 &amp;&amp; age < 65 &amp;&amp; !emp.careCheck) notes.push('40-64歳のため介護保険料が必要');
+            if (age >= 65 &amp;&amp; emp.careCheck)            notes.push('65歳到達のため介護保険料終了');
+            // 子育て支援金は健保加入と同条件
+            const childSupport = health;
+            return {
+                health, pension, care, childSupport,
+                employment: !!emp.employmentCheck,
+                age, notes: notes.join(' / '),
+            };
+        }
+
+        /**
+         * 全従業員の年齢到達状況をチェックして通知に追加する。
+         * 「今月／前月／翌月」に到達節目がある場合に警告。
+         */
+        function checkAgeMilestones() {
+            const today = new Date();
+            const ym = today.toISOString().slice(0, 7);
+            const milestones = [40, 65, 70, 75];
+            employees.filter(isActiveEmployee).forEach(emp => {
+                if (!emp.birthDate) return;
+                const ageThis  = getAgeAt(emp.birthDate, ym);
+                const ageNext  = getAgeAt(emp.birthDate,
+                    new Date(today.getFullYear(), today.getMonth() + 1, 15).toISOString().slice(0,7));
+                const ageLast  = getAgeAt(emp.birthDate,
+                    new Date(today.getFullYear(), today.getMonth() - 1, 15).toISOString().slice(0,7));
+                milestones.forEach(ms => {
+                    if (ageThis === ms &amp;&amp; ageLast === ms - 1) {
+                        notifications.push({
+                            type: 'warning',
+                            icon: '🎂',
+                            title: `${emp.name}さん：${ms}歳到達`,
+                            message: getAgeMilestoneMessage(ms),
+                            action: () => switchTab('employees'),
+                        });
+                    } else if (ageNext === ms &amp;&amp; ageThis === ms - 1) {
+                        notifications.push({
+                            type: 'info',
+                            icon: '⏰',
+                            title: `${emp.name}さん：来月 ${ms}歳到達予定`,
+                            message: '保険適用の切替手続きを準備してください: ' + getAgeMilestoneMessage(ms),
+                            action: () => switchTab('employees'),
+                        });
+                    }
+                });
+            });
+        }
+        function getAgeMilestoneMessage(milestone) {
+            switch (milestone) {
+                case 40: return '介護保険料の徴収を開始してください（emp-care-check を ON）';
+                case 65: return '介護保険料の徴収を終了してください（emp-care-check を OFF）';
+                case 70: return '厚生年金被保険者資格喪失。年金事務所への届出が必要';
+                case 75: return '健康保険被保険者資格喪失。後期高齢者医療制度へ移行';
+                default: return '';
+            }
+        }
+
+        // ============================================================
+        // 産休・育休 (社会保険料免除)
+        // ============================================================
+        /**
+         * 育児・介護休業法第61条、健康保険法第159条 等に基づき、
+         * 産前産後休業中／育児休業中は本人・会社の社会保険料が免除される。
+         * （雇用保険料は対象外。所得税・住民税も対象外）
+         */
+        function isOnLeave(emp) {
+            return !!(emp.onMaternityLeave || emp.onChildcareLeave);
+        }
+
+        // ============================================================
+        // 通勤手当の非課税限度額 (所得税法施行令第20条の2 / 第20条の3)
+        // ============================================================
+        /**
+         * 公共交通機関の通勤手当: 月150,000円まで非課税
+         * @param {number} monthly 月額通勤手当
+         * @returns {{taxable, nonTaxable}}
+         */
+        function splitCommuteAllowance(monthly, isPublicTransport) {
+            const m = parseInt(monthly) || 0;
+            // 公共交通機関は月15万円まで非課税。マイカーは距離別だが当面 5.5万円を保守的に適用。
+            // (片道2km未満: 0円、2km以上10km未満: 4,200円 ～ 55km以上: 31,600円。
+            //  詳細実装は将来。当面は公共と同等の上限を当てる)
+            const PUBLIC_CAP = 150000;
+            const CAR_CAP_SAFE = 31600; // 最高額（55km以上相当）。実距離未登録のため最大保守値
+            const cap = isPublicTransport ? PUBLIC_CAP : CAR_CAP_SAFE;
+            const nonTaxable = Math.min(m, cap);
+            const taxable = m - nonTaxable;
+            return { taxable, nonTaxable, cap, total: m };
+        }
+
+        // ============================================================
+        // 月額変更届 (随時改定) の検出
+        // ============================================================
+        /**
+         * 健康保険法施行令第8条 / 厚生年金保険法施行令第3条 に基づく随時改定の条件:
+         *   1. 固定的賃金の変動があった月以後3ヶ月の平均額に該当する標準報酬月額と、
+         *      従前の標準報酬月額との間に2等級以上の差が生じる
+         *   2. 3ヶ月とも支払基礎日数が17日以上 (パートは別基準)
+         * @returns {Array&lt;{empId, empName, prevStd, newStd, diffGrades, avg, monthRange}&gt;}
+         */
+        function detectMonthlyRevisions() {
+            const today = new Date();
+            const candidates = [];
+            employees.filter(isActiveEmployee).forEach(emp => {
+                if (!emp.healthCheck) return; // 健保未加入は対象外
+                // 直近3ヶ月分の給与記録
+                const recent3 = [];
+                for (let i = 1; i <= 3; i++) {
+                    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+                    const ym = d.toISOString().slice(0, 7);
+                    const rec = payrollRecords.find(r => r.empId === emp.id &amp;&amp; r.month === ym);
+                    if (rec) recent3.push(rec);
+                }
+                if (recent3.length < 3) return;
+                const avg = Math.floor(recent3.reduce((s, r) => s + (r.grossSalary || 0), 0) / 3);
+                const newStd = getStandardRemuneration(avg);
+                // 現在の標準報酬月額（emp.healthAmount から逆算）
+                const pref = emp.prefecture || 'tokyo';
+                const hr = getHealthRate(pref);
+                const currentStd = hr > 0 ? Math.round((emp.healthAmount || 0) * 200 / hr) : 0;
+                // 等級番号で比較
+                const currentGrade = getGradeFromStandard(currentStd) ||
+                    getGradeFromStandard(stdRemunerationTable.reduce((best, row) =>
+                        Math.abs(row.standard - currentStd) < Math.abs(best.standard - currentStd) ? row : best,
+                        stdRemunerationTable[0]).standard);
+                const newGrade = getGradeFromStandard(newStd);
+                if (currentGrade &amp;&amp; newGrade &amp;&amp; Math.abs(currentGrade - newGrade) >= 2) {
+                    candidates.push({
+                        empId: emp.id, empName: emp.name,
+                        prevStd: currentStd, newStd, prevGrade: currentGrade, newGrade,
+                        diffGrades: newGrade - currentGrade, avg,
+                        monthRange: recent3.map(r => r.month).join(' / '),
+                    });
+                }
+            });
+            return candidates;
+        }
+
         /**
          * 賞与の年間 健保標準賞与額累計（4月始まり）を返す。
          * 同年度内で 573 万円を超えると健保対象外。
@@ -14929,10 +15204,11 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             loadData();
             initDefaultRates();
             initDefaultHealthRates();
+            migrateHealthRatesIfStale(); // 旧年度の料率を令和8年度へ自動移行
             updateAllTables();
             updateCurrentRateDisplay();
             updateHealthRatesDisplay();
-            checkAndCreateNotifications(); // 通知チェック
+            checkAndCreateNotifications(); // 通知チェック（マイグレーション通知も含む）
             const today = new Date();
             const curMonth = today.toISOString().slice(0, 7);
             document.getElementById('calc-month').value = curMonth;
@@ -15030,6 +15306,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 id: document.getElementById('emp-id').value,
                 name: document.getElementById('emp-name').value,
                 nameKana: document.getElementById('emp-name-kana').value.trim(),
+                birthDate: document.getElementById('emp-birth-date').value || '',
                 type: type,
                 dependents: parseInt(document.getElementById('emp-dependents').value) || 0,
                 prefecture: document.getElementById('emp-prefecture').value || 'tokyo',
@@ -15040,7 +15317,11 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 healthAmount: parseInt(document.getElementById('emp-health-amount').value) || 0,
                 pensionAmount: parseInt(document.getElementById('emp-pension-amount').value) || 0,
                 careAmount: parseInt(document.getElementById('emp-care-amount').value) || 0,
-                childSupportAmount: parseInt(document.getElementById('emp-child-amount').value) || 0
+                childSupportAmount: parseInt(document.getElementById('emp-child-amount').value) || 0,
+                onMaternityLeave: !!document.getElementById('emp-maternity-leave')?.checked,
+                onChildcareLeave: !!document.getElementById('emp-childcare-leave')?.checked,
+                commuteAllowanceMonthly: parseInt(document.getElementById('emp-commute-monthly')?.value) || 0,
+                commuteIsPublicTransport: document.getElementById('emp-commute-type')?.value !== 'car'
             };
             
             if (info.salary === 'monthly') {
@@ -15132,6 +15413,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('emp-id').value = emp.id;
             document.getElementById('emp-name').value = emp.name;
             document.getElementById('emp-name-kana').value = emp.nameKana || '';
+            document.getElementById('emp-birth-date').value = emp.birthDate || '';
             document.getElementById('emp-type').value = emp.type;
             document.getElementById('emp-dependents').value = emp.dependents;
             document.getElementById('emp-prefecture').value = emp.prefecture || 'tokyo';
@@ -15139,6 +15421,10 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('emp-pension-amount').value = emp.pensionAmount;
             document.getElementById('emp-care-amount').value = emp.careAmount;
             document.getElementById('emp-child-amount').value = emp.childSupportAmount || 0;
+            const mlEl = document.getElementById('emp-maternity-leave'); if (mlEl) mlEl.checked = !!emp.onMaternityLeave;
+            const clEl = document.getElementById('emp-childcare-leave'); if (clEl) clEl.checked = !!emp.onChildcareLeave;
+            const cmEl = document.getElementById('emp-commute-monthly'); if (cmEl) cmEl.value = emp.commuteAllowanceMonthly || 0;
+            const ctEl = document.getElementById('emp-commute-type'); if (ctEl) ctEl.value = emp.commuteIsPublicTransport === false ? 'car' : 'public';
             if (emp.salary === 'monthly') {
                 document.getElementById('emp-monthly-salary').value = emp.monthlySalary;
                 document.getElementById('emp-resident-tax-m').value = emp.residentTax;
@@ -15213,11 +15499,13 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const deduction = 0;
                 const grossSalary = basePay;
                 
-                const health = emp.healthCheck ? emp.healthAmount : 0;
-                const pension = emp.pensionCheck ? emp.pensionAmount : 0;
-                const care = emp.careCheck ? emp.careAmount : 0;
-                // 子ども・子育て支援金（2026/4〜）
-                const childSupport = emp.healthCheck ? (emp.childSupportAmount || 0) : 0;
+                // 年齢ベース判定 + 産休/育休フラグ
+                const ins = getInsuranceStatusAtMonth(emp, month);
+                const onLeave = isOnLeave(emp);
+                const health       = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+                const pension      = (!onLeave &amp;&amp; ins.pension)      ? (emp.pensionAmount || 0) : 0;
+                const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
+                const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
                 const employment = 0; // 役員は雇用保険なし
                 const incomeTax = calculateIncomeTax(grossSalary, emp.dependents);
                 const residentTax = emp.residentTax;
@@ -15315,10 +15603,10 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const empId = document.getElementById('calc-employee').value;
             const emp = employees.find(e => e.id === empId);
             if (!emp) { alert('従業員を選択してください'); return; }
-            
+
             const rates = getCurrentRates(month);
             if (!rates) { alert('雇用保険料率が設定されていません'); return; }
-            
+
             let basePay = 0, commission = 0;
             if (emp.salary === 'hourly') {
                 const hours = parseFloat(document.getElementById('calc-hours').value) || 0;
@@ -15327,30 +15615,55 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 basePay = emp.monthlySalary;
                 commission = parseInt(document.getElementById('calc-commission').value) || 0;
             }
-            
+
             const allowance = parseInt(document.getElementById('calc-allowance').value) || 0;
             const deduction = parseInt(document.getElementById('calc-deduction').value) || 0;
-            const grossSalary = basePay + commission + allowance - deduction;
-            
-            const health = emp.healthCheck ? emp.healthAmount : 0;
-            const pension = emp.pensionCheck ? emp.pensionAmount : 0;
-            const care = emp.careCheck ? emp.careAmount : 0;
-            // 子ども・子育て支援金（2026/4〜、健康保険加入者が対象、労使折半 0.115%）
-            const childSupport = emp.healthCheck ? (emp.childSupportAmount || 0) : 0;
-            const employment = emp.employmentCheck ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
-            const incomeTax = calculateIncomeTax(grossSalary, emp.dependents);
-            const residentTax = emp.residentTax;
-            const totalDed = health + pension + care + childSupport + employment + incomeTax + residentTax;
-            const netSalary = grossSalary - totalDed;
+
+            // 通勤手当の非課税分を所得税課税ベースから除外
+            const commute = splitCommuteAllowance(
+                emp.commuteAllowanceMonthly || 0,
+                emp.commuteIsPublicTransport !== false);
+            const commuteNonTaxable = commute.nonTaxable;
+            const commuteTaxable    = commute.taxable;
+
+            // 総支給額（給与明細表示用）= 基本給 + 歩合 + 諸手当 + 通勤手当 - 控除（欠勤等）
+            const grossSalary = basePay + commission + allowance + commute.total - deduction;
+            // 所得税の課税対象額 = 総支給額 - 通勤手当非課税分
+            const taxableGross = grossSalary - commuteNonTaxable;
+
+            // 年齢ベースで保険適用を判定（誕生日未登録なら手動チェック値を使用）
+            const ins = getInsuranceStatusAtMonth(emp, month);
+            // 産休・育休中は社会保険料免除（雇用保険・所得税・住民税は通常通り）
+            const onLeave = isOnLeave(emp);
+
+            const health       = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+            const pension      = (!onLeave &amp;&amp; ins.pension)      ? (emp.pensionAmount || 0) : 0;
+            const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
+            const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
+            const employment   = ins.employment ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
+            // 所得税は通勤手当非課税分を控除した課税対象額で計算
+            const incomeTax    = calculateIncomeTax(taxableGross, emp.dependents);
+            const residentTax  = emp.residentTax;
+            const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
+            const netSalary    = grossSalary - totalDed;
 
             currentCalculation = {
                 month, empId, empName: emp.name, empType: emp.type,
-                basePay, commission, allowance, deduction, grossSalary,
-                health, pension, care, childSupport, employment, incomeTax, residentTax, totalDed, netSalary
+                basePay, commission, allowance, deduction,
+                commuteTotal: commute.total, commuteNonTaxable, commuteTaxable,
+                grossSalary, taxableGross,
+                health, pension, care, childSupport, employment,
+                incomeTax, residentTax, totalDed, netSalary,
+                onLeave, age: ins.age, insuranceNotes: ins.notes,
             };
-            
+
             displayCalculationResults();
             checkIncomeWall(emp, month, netSalary);
+
+            // 育休/産休中だった場合は明示的に表示
+            if (onLeave) {
+                alert('💡 産休／育休中のため、社会保険料（健保・年金・介護・支援金）は法令により免除されています。\n（雇用保険・所得税・住民税は通常通り徴収）');
+            }
         }
 
         function displayCalculationResults() {
@@ -15414,7 +15727,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             // 共通: 1000円未満切り捨て
             const bonusStdRaw = Math.floor(bonusAmt / 1000) * 1000;
 
-            // 年金保険: 1回 150万円上限
+            // 厚生年金保険: 1回 150万円上限
+            // （月次の標準報酬月額の最高65万円とは別枠の賞与専用上限）
             const pensionBase = Math.min(bonusStdRaw, PAYROLL_CONSTANTS.bonusPensionPerTimeCap);
 
             // 健保(+介護+子育て支援金): 年度累計 573万円上限
@@ -15430,16 +15744,20 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const empPref = emp.prefecture || 'tokyo';
             const healthRate = getHealthRate(empPref);
 
+            // ----- 年齢ベース判定 + 産休/育休フラグ -------------------
+            const ins = getInsuranceStatusAtMonth(emp, month);
+            const onLeave = isOnLeave(emp);
+
             // ----- 各種控除（端数は法令準拠で roundShakai） ----------
-            const health = emp.healthCheck
+            const health = (!onLeave &amp;&amp; ins.health)
                 ? roundShakai(healthBase * healthRate / 100 / 2) : 0;
-            const pension = emp.pensionCheck
+            const pension = (!onLeave &amp;&amp; ins.pension)
                 ? roundShakai(pensionBase * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0;
-            const care = emp.careCheck
+            const care = (!onLeave &amp;&amp; ins.care)
                 ? roundShakai(healthBase * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
-            const childSupport = emp.healthCheck
+            const childSupport = (!onLeave &amp;&amp; ins.childSupport)
                 ? roundShakai(healthBase * PAYROLL_CONSTANTS.childSupportRate / 100 / 2) : 0;
-            const employment = emp.employmentCheck
+            const employment = ins.employment
                 ? Math.floor(bonusAmt * rates.employmentEmployee / 100) : 0;
 
             const prevMonth = getPrevMonth(month);
@@ -15528,12 +15846,69 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             }
         }
 
-        function getBonusTaxRate(prevSalary, dependents) {
-            if (prevSalary < 200000) return dependents > 0 ? 0.021 : 0.0315;
-            if (prevSalary < 300000) return dependents > 0 ? 0.0315 : 0.0315;
-            if (prevSalary < 400000) return dependents > 0 ? 0.042 : 0.0525;
-            if (prevSalary < 500000) return dependents > 0 ? 0.0525 : 0.063;
-            return dependents > 0 ? 0.063 : 0.0735;
+        /**
+         * 賞与に対する源泉徴収税額の算出率の表（国税庁 令和7年分以降 賞与税額表）
+         * 出典: https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2024/02.htm
+         *
+         * 前月の社会保険料控除後の給与額に基づいて適用税率が決まる。
+         * 各行は [前月給与の下限(円), 扶養人数別税率の配列]。
+         * 扶養人数 0/1/2/3/4/5/6/7人＋ に対する税率（％）。
+         * 7人超は復興特別所得税込みの最大税率を適用。
+         */
+        const BONUS_TAX_TABLE_KOU = [
+            // [前月給与下限, [扶0, 扶1, 扶2, 扶3, 扶4, 扶5, 扶6, 扶7]] (%)
+            [        0, [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000]],
+            [    68000, [2.042, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000]],
+            [    79000, [2.042, 2.042, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000]],
+            [   252000, [4.084, 2.042, 2.042, 0.000, 0.000, 0.000, 0.000, 0.000]],
+            [   300000, [4.084, 4.084, 2.042, 2.042, 0.000, 0.000, 0.000, 0.000]],
+            [   334000, [6.126, 4.084, 4.084, 2.042, 2.042, 0.000, 0.000, 0.000]],
+            [   363000, [6.126, 6.126, 4.084, 4.084, 2.042, 2.042, 0.000, 0.000]],
+            [   395000, [6.126, 6.126, 6.126, 4.084, 4.084, 2.042, 2.042, 0.000]],
+            [   426000, [8.168, 6.126, 6.126, 6.126, 4.084, 4.084, 2.042, 2.042]],
+            [   550000, [10.210, 8.168, 8.168, 6.126, 6.126, 6.126, 4.084, 4.084]],
+            [   647000, [12.252, 10.210, 10.210, 8.168, 8.168, 8.168, 6.126, 6.126]],
+            [   699000, [14.294, 12.252, 12.252, 10.210, 10.210, 10.210, 8.168, 8.168]],
+            [   730000, [16.336, 14.294, 14.294, 12.252, 12.252, 12.252, 10.210, 10.210]],
+            [   763000, [18.378, 16.336, 16.336, 14.294, 14.294, 14.294, 12.252, 12.252]],
+            [   795000, [20.420, 18.378, 18.378, 16.336, 16.336, 16.336, 14.294, 14.294]],
+            [   882000, [22.462, 20.420, 20.420, 18.378, 18.378, 18.378, 16.336, 16.336]],
+            [   945000, [24.504, 22.462, 22.462, 20.420, 20.420, 20.420, 18.378, 18.378]],
+            [  1022000, [26.546, 24.504, 24.504, 22.462, 22.462, 22.462, 20.420, 20.420]],
+            [  1099000, [28.588, 26.546, 26.546, 24.504, 24.504, 24.504, 22.462, 22.462]],
+            [  1408000, [30.630, 28.588, 28.588, 26.546, 26.546, 26.546, 24.504, 24.504]],
+            [  1755000, [32.672, 30.630, 30.630, 28.588, 28.588, 28.588, 26.546, 26.546]],
+            [  2102000, [35.735, 33.693, 33.693, 31.651, 31.651, 31.651, 29.609, 29.609]],
+            [  2702000, [38.798, 36.756, 36.756, 34.714, 34.714, 34.714, 32.672, 32.672]],
+            [  3502000, [41.861, 39.819, 39.819, 37.777, 37.777, 37.777, 35.735, 35.735]],
+            [  4202000, [45.945, 43.903, 43.903, 41.861, 41.861, 41.861, 39.819, 39.819]],
+        ];
+
+        /**
+         * 乙欄（副業者用）の税率は固定: 賞与額の 30.42%（10万円以下）/ 40.84%（10万円超は不要・累進）
+         * 簡易実装として 10万円以下は 30.42%、それ以上は段階的に増。
+         * 実務上の乙欄は給与計算ソフトで個別計算が必要なので、ここではフラットレート扱い。
+         */
+        const BONUS_TAX_RATE_OTSU = 30.42;
+
+        /**
+         * 賞与の源泉徴収税率を返す（%、復興特別所得税込み）。
+         * @param {number} prevSalary 前月の社会保険料控除後の給与額
+         * @param {number} dependents 扶養人数
+         * @param {boolean} [useOtsu=false] 乙欄（主たる給与でない）の場合 true
+         * @returns {number} 税率（%）
+         */
+        function getBonusTaxRate(prevSalary, dependents, useOtsu) {
+            if (useOtsu) return BONUS_TAX_RATE_OTSU / 100;
+            const depIdx = Math.min(Math.max(parseInt(dependents) || 0, 0), 7);
+            // テーブル降順で「該当する下限」を探す
+            for (let i = BONUS_TAX_TABLE_KOU.length - 1; i >= 0; i--) {
+                const [threshold, rates] = BONUS_TAX_TABLE_KOU[i];
+                if (prevSalary >= threshold) {
+                    return rates[depIdx] / 100;
+                }
+            }
+            return 0;
         }
 
         function getPrevMonth(month) {
@@ -15750,13 +16125,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 if (salaries.length === 0) return;
                 
                 const avg = Math.floor(salaries.reduce((a,b) => a+b,0) / salaries.length);
-                const std = getStandardRemuneration(avg);
+                const std        = getStandardRemuneration(avg);          // 健保: 1-50等級
+                const pensionStd = getPensionStandardRemuneration(avg);   // 厚生年金: 1-32等級（上限65万円）
                 const empPref = emp.prefecture || 'tokyo';
                 const healthRate = getHealthRate(empPref);
 
                 // 法令準拠の端数処理 (50銭以下切り捨て・50銭超切り上げ)
                 const health  = roundShakai(std * healthRate / 100 / 2);
-                const pension = roundShakai(std * PAYROLL_CONSTANTS.pensionRate / 100 / 2);
+                const pension = roundShakai(pensionStd * PAYROLL_CONSTANTS.pensionRate / 100 / 2);
                 const care    = emp.careCheck   ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
                 // 子ども・子育て支援金 (2026/4〜)：全国一律 0.23%、労使折半
                 const childSupport = emp.healthCheck
@@ -15837,15 +16213,50 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             }
         }
 
+        // 令和8年度（2026年度）協会けんぽ料率（3月分・4月納付分から適用）
+        // 出典: https://www.kyoukaikenpo.or.jp/about/business/insurance_rate/rate_prefectures/r08/
+        const HEALTH_RATES_FY2026 = {
+            tokyo:    9.85,
+            kanagawa: 9.92,
+            aichi:    9.93,
+            gifu:     9.80,
+        };
+
+        // 過去の料率（マイグレーション判定用）
+        const HEALTH_RATES_FY2024 = { tokyo: 9.98, kanagawa: 10.02, aichi: 10.01, gifu: 10.06 };
+        const HEALTH_RATES_FY2025 = { tokyo: 9.91, kanagawa: 9.92,  aichi: 10.03, gifu: 9.93  };
+
         function initDefaultHealthRates() {
             if (Object.keys(healthRates).length === 0) {
-                healthRates = {
-                    tokyo: 9.98,
-                    kanagawa: 10.02,
-                    aichi: 10.01,
-                    gifu: 10.06
-                };
-                saveData();
+                healthRates = { ...HEALTH_RATES_FY2026 };
+                saveData('healthRates');
+            }
+        }
+
+        /**
+         * 健康保険料率の自動マイグレーション。
+         * 既存料率が「旧年度の初期値そのまま」だった場合、令和8年度の値に自動更新。
+         * 手動カスタム値（旧年度の初期値と完全一致しない）の場合は触らない。
+         */
+        function migrateHealthRatesIfStale() {
+            const matches = (current, ref) => {
+                if (!current || Object.keys(current).length === 0) return false;
+                return Object.keys(ref).every(k =>
+                    typeof current[k] === 'number' &amp;&amp; Math.abs(current[k] - ref[k]) < 0.005);
+            };
+            if (matches(healthRates, HEALTH_RATES_FY2024) || matches(healthRates, HEALTH_RATES_FY2025)) {
+                const old = JSON.stringify(healthRates);
+                healthRates = { ...HEALTH_RATES_FY2026 };
+                saveData('healthRates');
+                console.info('[migration] healthRates updated from', old, 'to', JSON.stringify(healthRates));
+                notifications = notifications || [];
+                notifications.push({
+                    type: 'info',
+                    icon: '✅',
+                    title: '健康保険料率を令和8年度に自動更新',
+                    message: `東京 ${HEALTH_RATES_FY2026.tokyo}% / 神奈川 ${HEALTH_RATES_FY2026.kanagawa}% / 愛知 ${HEALTH_RATES_FY2026.aichi}% / 岐阜 ${HEALTH_RATES_FY2026.gifu}% に更新しました。`,
+                    action: () => switchTab('rates'),
+                });
             }
         }
 
@@ -16294,33 +16705,48 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     action: () => switchTab('year-end')
                 });
             }
-            employees.forEach(emp => {
+            activeEmployees().forEach(emp => {
                 if (emp.type === 'arbeit' || emp.type === 'parttime' || emp.type === 'parttime-short') {
                     const year = today.getFullYear();
                     const yearTotal = payrollRecords
                         .filter(r => r.empId === emp.id &amp;&amp; r.month.startsWith(year.toString()))
                         .reduce((sum, r) => sum + r.grossSalary, 0);
-                    if (yearTotal >= 950000 &amp;&amp; yearTotal < 1030000) {
+                    if (yearTotal >= PAYROLL_CONSTANTS.notifyTaxWall &amp;&amp; yearTotal < PAYROLL_CONSTANTS.incomeTaxWall) {
                         notifications.push({
                             type: 'alert',
                             icon: '⚠️',
                             title: `${emp.name}さん：103万円の壁に接近`,
-                            message: `現在の年収：${formatCurrency(yearTotal)}。あと${formatCurrency(1030000 - yearTotal)}で103万円を超えます。`,
+                            message: `現在の年収：${formatCurrency(yearTotal)}。あと${formatCurrency(PAYROLL_CONSTANTS.incomeTaxWall - yearTotal)}で103万円を超えます。`,
                             action: () => switchTab('annual')
                         });
                     }
-                    if (yearTotal >= 1200000 &amp;&amp; yearTotal < 1300000) {
+                    if (yearTotal >= PAYROLL_CONSTANTS.notifyInsuranceWall &amp;&amp; yearTotal < PAYROLL_CONSTANTS.insuranceWall) {
                         notifications.push({
                             type: 'alert',
                             icon: '⚠️',
                             title: `${emp.name}さん：130万円の壁に接近`,
-                            message: `現在の年収：${formatCurrency(yearTotal)}。あと${formatCurrency(1300000 - yearTotal)}で130万円を超えます。`,
+                            message: `現在の年収：${formatCurrency(yearTotal)}。あと${formatCurrency(PAYROLL_CONSTANTS.insuranceWall - yearTotal)}で130万円を超えます。`,
                             action: () => switchTab('annual')
                         });
                     }
                 }
             });
-            
+
+            // 年齢到達（40/65/70/75歳）の警告
+            checkAgeMilestones();
+
+            // 月額変更届（随時改定）対象者の警告
+            const revisions = detectMonthlyRevisions();
+            revisions.forEach(r => {
+                notifications.push({
+                    type: 'alert',
+                    icon: '📝',
+                    title: `${r.empName}さん：月額変更届の対象`,
+                    message: `直近3ヶ月平均 ${formatCurrency(r.avg)} で標準報酬月額が ${r.prevGrade}等級(¥${r.prevStd.toLocaleString('ja-JP')}) → ${r.newGrade}等級(¥${r.newStd.toLocaleString('ja-JP')}) に変動。月変届の提出をご検討ください。`,
+                    action: () => switchTab('assessment'),
+                });
+            });
+
             updateNotificationUI();
         }
 
