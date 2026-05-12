@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.1 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.3 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -17938,7 +17938,237 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             alert('✅ 給与データを更新しました');
         }
 
-        function printPayrollList() { window.print(); }
+        /**
+         * 給与一覧の印刷。
+         * 旧版は 18列を1行に圧縮 → 7.5px まで縮んで読めなかった。
+         * 新版: 別ウィンドウを開き、1名2行 (支給行 + 控除行) のカード型レイアウトで印刷。
+         * - A4 横向き、1ページ約 8-10名
+         * - フォント 11-13pt で老眼でも読める
+         * - 支給/差引 は太字＋背景色で強調
+         */
+        function printPayrollList() {
+            const month = document.getElementById('list-month').value;
+            const records = (month ? payrollRecords.filter(r => r.month === month) : payrollRecords)
+                .slice().sort((a, b) => (a.empId || '').localeCompare(b.empId || ''));
+            if (records.length === 0) {
+                alert('印刷対象のレコードがありません。先に対象月を選択してください。');
+                return;
+            }
+
+            const fmt = (n) => '¥' + (parseInt(n) || 0).toLocaleString('ja-JP');
+            const total = records.reduce((s, r) => s + (r.netSalary || 0), 0);
+            const totalGross = records.reduce((s, r) => s + (r.grossSalary || 0), 0);
+            const totalDed = records.reduce((s, r) => s + (r.totalDed || 0), 0);
+            const company = (companyInfo &amp;&amp; companyInfo.name) || '有限会社NOVA';
+            const printedAt = new Date().toLocaleString('ja-JP');
+            const period = month ? `${month.split('-')[0]}年${parseInt(month.split('-')[1])}月` : '全期間';
+
+            const blocks = records.map((rec, idx) => {
+                const emp = employees.find(e => e.id === rec.empId);
+                const dep = emp ? (emp.dependents || 0) : '?';
+                const empType = empTypeLabels ? (empTypeLabels[rec.empType] || rec.empType || '') : (rec.empType || '');
+                return `
+                <div class=&quot;rec&quot;>
+                    <div class=&quot;rec-head&quot;>
+                        <span class=&quot;rec-num&quot;>${idx + 1}.</span>
+                        <span class=&quot;rec-id&quot;>${escapeHtml(rec.empId || '')}</span>
+                        <span class=&quot;rec-name&quot;>${escapeHtml(rec.empName || '')}</span>
+                        <span class=&quot;rec-type&quot;>${escapeHtml(empType)}</span>
+                        <span class=&quot;rec-dep&quot;>扶養 ${dep}人</span>
+                        <span class=&quot;rec-month&quot;>${escapeHtml(rec.month || '')}</span>
+                    </div>
+                    <div class=&quot;rec-grid&quot;>
+                        <div class=&quot;col col-pay&quot;>
+                            <div class=&quot;col-title&quot;>支給</div>
+                            <div class=&quot;kv&quot;><span>基本給</span><span>${fmt(rec.basePay)}</span></div>
+                            <div class=&quot;kv&quot;><span>歩合</span><span>${fmt(rec.commission || 0)}</span></div>
+                            <div class=&quot;kv&quot;><span>手当</span><span>${fmt(rec.allowance)}</span></div>
+                            <div class=&quot;kv minus&quot;><span>控除</span><span>−${fmt(rec.deduction)}</span></div>
+                            <div class=&quot;kv strong gross&quot;><span>総支給</span><span>${fmt(rec.grossSalary)}</span></div>
+                        </div>
+                        <div class=&quot;col col-ded&quot;>
+                            <div class=&quot;col-title&quot;>社会保険料</div>
+                            <div class=&quot;kv&quot;><span>健保</span><span>${fmt(rec.health)}</span></div>
+                            <div class=&quot;kv&quot;><span>年金</span><span>${fmt(rec.pension)}</span></div>
+                            <div class=&quot;kv&quot;><span>介護</span><span>${fmt(rec.care)}</span></div>
+                            <div class=&quot;kv&quot;><span>支援金</span><span>${fmt(rec.childSupport || 0)}</span></div>
+                            <div class=&quot;kv&quot;><span>雇用</span><span>${fmt(rec.employment)}</span></div>
+                        </div>
+                        <div class=&quot;col col-tax&quot;>
+                            <div class=&quot;col-title&quot;>税金</div>
+                            <div class=&quot;kv&quot;><span>所得税</span><span>${fmt(rec.incomeTax)}</span></div>
+                            <div class=&quot;kv&quot;><span>住民税</span><span>${fmt(rec.residentTax)}</span></div>
+                            <div class=&quot;kv strong&quot;><span>控除計</span><span>${fmt(rec.totalDed)}</span></div>
+                        </div>
+                        <div class=&quot;col col-net&quot;>
+                            <div class=&quot;col-title net-title&quot;>差引支給額</div>
+                            <div class=&quot;net-amount&quot;>${fmt(rec.netSalary)}</div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            const html = `<!DOCTYPE html>
+<html lang=&quot;ja&quot;>
+<head>
+<meta charset=&quot;UTF-8&quot;>
+<title>給与一覧 ${period}</title>
+<style>
+    @page { size: A4 landscape; margin: 10mm 8mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
+        color: #111;
+        line-height: 1.35;
+        font-size: 11pt;
+        background: white;
+    }
+    .header {
+        display: flex; justify-content: space-between; align-items: flex-end;
+        border-bottom: 2px solid #111;
+        padding-bottom: 6px;
+        margin-bottom: 10px;
+    }
+    .header h1 { font-size: 18pt; font-weight: 700; }
+    .header .meta { font-size: 9pt; color: #444; text-align: right; }
+    .header .meta div { margin-top: 1px; }
+    .summary {
+        display: grid; grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px; margin-bottom: 10px;
+        font-size: 10pt;
+    }
+    .summary > div {
+        border: 1px solid #999; padding: 6px 10px; border-radius: 4px;
+    }
+    .summary .lbl { font-size: 9pt; color: #444; }
+    .summary .val { font-size: 13pt; font-weight: 700; }
+    .summary .val.net { color: #1e40af; }
+
+    .rec {
+        border: 1px solid #333;
+        border-radius: 4px;
+        margin-bottom: 5px;
+        page-break-inside: avoid;
+        background: #fff;
+    }
+    .rec-head {
+        background: #1e293b; color: white;
+        padding: 4px 10px;
+        font-size: 11pt;
+        display: flex; gap: 12px; align-items: baseline;
+    }
+    .rec-head .rec-num { color: #cbd5e1; font-size: 10pt; }
+    .rec-head .rec-id { font-family: 'Courier New', monospace; font-size: 10pt; color: #94a3b8; }
+    .rec-head .rec-name { font-weight: 700; font-size: 12pt; }
+    .rec-head .rec-type { font-size: 9pt; color: #cbd5e1; background: #334155; padding: 1px 6px; border-radius: 3px; }
+    .rec-head .rec-dep { font-size: 9pt; color: #fef3c7; background: #92400e; padding: 1px 6px; border-radius: 3px; }
+    .rec-head .rec-month { margin-left: auto; font-size: 9pt; color: #cbd5e1; }
+
+    .rec-grid {
+        display: grid;
+        grid-template-columns: 1.5fr 1.5fr 1.2fr 1.5fr;
+        gap: 0;
+    }
+    .col {
+        padding: 4px 8px;
+        border-right: 1px solid #d1d5db;
+    }
+    .col:last-child { border-right: none; }
+    .col-title {
+        font-size: 8pt;
+        color: #6b7280;
+        font-weight: 600;
+        border-bottom: 1px dashed #d1d5db;
+        margin-bottom: 3px;
+        padding-bottom: 2px;
+        letter-spacing: 1px;
+    }
+    .kv {
+        display: flex; justify-content: space-between;
+        font-size: 10pt;
+        padding: 1px 0;
+    }
+    .kv span:first-child { color: #444; }
+    .kv span:last-child { font-family: 'Courier New', monospace; font-weight: 500; }
+    .kv.minus span:last-child { color: #b91c1c; }
+    .kv.strong { font-weight: 700; border-top: 1px solid #999; padding-top: 2px; margin-top: 2px; }
+    .kv.gross span:last-child { font-size: 11pt; color: #047857; }
+
+    .col-net { background: #eff6ff; display: flex; flex-direction: column; justify-content: center; }
+    .col-net .net-title { color: #1e40af; font-size: 10pt; border-bottom: none; text-align: center; }
+    .col-net .net-amount {
+        font-size: 22pt; font-weight: 700; color: #1e40af;
+        text-align: center; font-family: 'Courier New', monospace;
+        letter-spacing: -1px;
+    }
+
+    .footer {
+        margin-top: 14px;
+        border-top: 1px solid #999;
+        padding-top: 8px;
+        display: flex; justify-content: space-between;
+        font-size: 9pt; color: #555;
+    }
+    @media print {
+        .no-print { display: none !important; }
+        .rec { break-inside: avoid; }
+    }
+    .toolbar {
+        position: fixed; top: 10px; right: 10px;
+        display: flex; gap: 8px;
+        background: rgba(255,255,255,0.95);
+        padding: 6px 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .toolbar button {
+        background: #1e40af; color: white; border: none;
+        padding: 6px 14px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-family: inherit;
+    }
+    .toolbar button.secondary { background: #6b7280; }
+</style>
+</head>
+<body>
+    <div class=&quot;toolbar no-print&quot;>
+        <button onclick=&quot;window.print()&quot;>🖨 印刷</button>
+        <button class=&quot;secondary&quot; onclick=&quot;window.close()&quot;>閉じる</button>
+    </div>
+    <div class=&quot;header&quot;>
+        <h1>${escapeHtml(company)} 給与一覧</h1>
+        <div class=&quot;meta&quot;>
+            <div>対象期間: <strong>${period}</strong></div>
+            <div>対象人数: <strong>${records.length}名</strong></div>
+            <div>発行日時: ${printedAt}</div>
+        </div>
+    </div>
+    <div class=&quot;summary&quot;>
+        <div><div class=&quot;lbl&quot;>総支給合計</div><div class=&quot;val&quot;>${fmt(totalGross)}</div></div>
+        <div><div class=&quot;lbl&quot;>控除合計</div><div class=&quot;val&quot;>${fmt(totalDed)}</div></div>
+        <div><div class=&quot;lbl&quot;>差引支給合計（振込額）</div><div class=&quot;val net&quot;>${fmt(total)}</div></div>
+    </div>
+    ${blocks}
+    <div class=&quot;footer&quot;>
+        <div>作成: NOVA Core 給与計算 v2.6.2 / 出力: ${printedAt}</div>
+        <div>${records.length}名 / 振込額合計 ${fmt(total)}</div>
+    </div>
+    <script>
+        // 開いたらすぐ印刷プレビュー
+        window.addEventListener('load', () => { setTimeout(() => window.print(), 200); });
+    <\/script>
+</body>
+</html>`;
+
+            const win = window.open('', '_blank', 'width=1200,height=800');
+            if (!win) {
+                alert('ポップアップがブロックされました。\n\nブラウザのアドレスバー右側にあるアイコンで「ポップアップを許可」してください。');
+                return;
+            }
+            win.document.open();
+            win.document.write(html);
+            win.document.close();
+        }
         
         function printEmployeeList() { window.print(); }
         function showBulkPrintModal() {
@@ -18424,7 +18654,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.1
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.3
                     </div>
                 </div>
             `;
