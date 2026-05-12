@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.5 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.6 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14892,31 +14892,6 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         <!-- Tab: 給与一覧 -->
         <div id=&quot;tab-list&quot; class=&quot;tab-content hidden&quot;>
-            <div class=&quot;card no-print&quot; id=&quot;tax-advisor-fix-card&quot; style=&quot;background:#fffbeb;border:2px solid #f59e0b;&quot;>
-                <div class=&quot;card-header&quot; style=&quot;color:#78350f;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;&quot;>
-                    <span>📋 税理士の修正を一括適用（2026年4月分）</span>
-                    <button class=&quot;btn btn-secondary&quot; onclick=&quot;document.getElementById('tax-advisor-fix-card').style.display='none'&quot; style=&quot;margin:0;padding:6px 12px;font-size:12px;&quot;>✕ 非表示</button>
-                </div>
-                <div style=&quot;padding:0 4px;color:#78350f;&quot;>
-                    <div style=&quot;font-size:13px;line-height:1.7;&quot;>
-                        税理士から修正の指摘を受けた以下の内容を、1ボタンで全部反映します:
-                    </div>
-                    <ul style=&quot;margin:8px 20px;font-size:12px;line-height:1.7;&quot;>
-                        <li>都道府県を全員「東京都」に修正（健保料率 9.85% で再計算）</li>
-                        <li>鈴木亨・鈴木可子の標準報酬月額を ¥126,000 に設定</li>
-                        <li>従業員マスタの全員の社保額（健保/年金/介護/支援金）を最新料率で再計算</li>
-                        <li>2026年4月の全員の給与レコードを上書き再計算</li>
-                        <li>鈴木篤の所得税を ¥72,018（税理士指定値）に上書き</li>
-                        <li>五島未瑞希の所得税を ¥0（税理士指定値）に上書き</li>
-                    </ul>
-                    <div style=&quot;margin:10px 0;padding:8px;background:#fef3c7;border-radius:6px;font-size:12px;&quot;>
-                        ⚠️ 既存データを上書きするので、念のため事前に「給与一覧 → 一覧を印刷」で現在のスナップショットを保存することをお勧めします。
-                    </div>
-                    <div style=&quot;display:flex;gap:10px;margin:12px 0 4px;&quot;>
-                        <button class=&quot;btn&quot; onclick=&quot;applyTaxAdvisorFixes()&quot; style=&quot;background:#dc2626;color:white;font-weight:700;padding:12px 24px;&quot;>🛠 税理士の修正をすべて適用する</button>
-                    </div>
-                </div>
-            </div>
             <div class=&quot;card&quot;>
                 <div class=&quot;card-header&quot;>給与一覧</div>
                 <div class=&quot;search-bar&quot;>
@@ -18700,7 +18675,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.5
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.6
                     </div>
                 </div>
             `;
@@ -19176,19 +19151,10 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         // ============================================================
-        // 税理士からの修正を一括適用 (2026-04 専用) — v2.6.5
+        // 税理士からの修正を一括適用 (2026-04 一回限り、v2.6.5) — v2.6.6 で UI 削除
+        // 関数は履歴のため残置。再利用する場合は呼び出し元 UI を復元してください
         // ============================================================
-        /**
-         * 税理士から指摘された修正を一発で全部反映する。
-         * 操作内容:
-         *   1. 該当全員の prefecture を 'tokyo' に修正
-         *   2. 鈴木亨・鈴木可子の standardRemuneration を 126000 に設定
-         *   3. 介護保険料率は v2.6.4 で 1.62% に修正済 (定数)
-         *   4. 全員の社保額を最新料率で再計算 (recalcAllInsuranceAmounts 相当)
-         *   5. 2026-04 の全員の給与レコードを上書き再計算
-         *   6. 鈴木篤の所得税を ¥72,018 (税理士指定) に上書き
-         *   7. 五島未瑞希の所得税を ¥0 (税理士指定) に上書き
-         */
+        /** @deprecated v2.6.6 で UI 撤去 (2026-04 専用、一回限りの修正だったため) */
         function applyTaxAdvisorFixes() {
             const TARGET_MONTH = '2026-04';
             const msg = `税理士から指摘された修正を一括適用します。\n\n` +
