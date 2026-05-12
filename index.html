@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.1 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14886,6 +14886,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 <div class=&quot;search-bar&quot;>
                     <input type=&quot;month&quot; class=&quot;search-input&quot; id=&quot;list-month&quot;>
                     <button class=&quot;btn btn-primary&quot; onclick=&quot;filterPayrollList()&quot;>表示</button>
+                    <button class=&quot;btn&quot; onclick=&quot;diagnosePayrollIntegrity()&quot; style=&quot;background:#0ea5e9;color:white;&quot; title=&quot;対象月の全レコードと従業員マスタを総点検し、各項目を「正規値」と比較。ズレを赤字表示し、自動修正できます&quot;>🔍 数値検証（診断）</button>
                     <button class=&quot;btn&quot; onclick=&quot;recalcAllPayrollForMonth()&quot; style=&quot;background:#f59e0b;color:white;&quot; title=&quot;選択中の対象月の全員の給与レコードを、現行の従業員マスタ値（社保額・住民税など）と最新ロジックで再計算します&quot;>♻ 対象月の給与を全員再計算</button>
                     <button class=&quot;btn btn-success&quot; onclick=&quot;showBulkPrintModal()&quot;>給与明細を一括印刷</button>
                     <button class=&quot;btn btn-secondary&quot; onclick=&quot;printPayrollList()&quot;>一覧を印刷</button>
@@ -17074,12 +17075,26 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 return;
             }
             
+            // 既存レコードを検出 → 上書き確認
+            const existingRecs = executives.map(e =>
+                payrollRecords.find(r => r.month === month &amp;&amp; r.empId === e.id)).filter(Boolean);
+            let overwrite = false;
+            if (existingRecs.length > 0) {
+                overwrite = confirm(
+                    `${month} に既存の役員給与レコードが ${existingRecs.length} 件あります。\n\n` +
+                    `[OK] 既存レコードも最新マスタ値・最新ロジックで上書き再計算する\n` +
+                    `[キャンセル] 既存レコードはそのまま、未計算の役員のみ新規作成\n\n` +
+                    `※ v2.6 で所得税計算ロジックを「社保控除後の額」に修正済みのため、\n` +
+                    `  旧レコードがある場合は上書き再計算を推奨します`);
+            }
+
             let successCount = 0;
+            let updatedCount = 0;
             let skipCount = 0;
-            
+
             executives.forEach(emp => {
                 const existing = payrollRecords.find(r => r.month === month &amp;&amp; r.empId === emp.id);
-                if (existing) {
+                if (existing &amp;&amp; !overwrite) {
                     skipCount++;
                     return;
                 }
@@ -17126,16 +17141,22 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     netSalary
                 };
                 
-                payrollRecords.push(calculation);
-                successCount++;
+                if (existing) {
+                    Object.assign(existing, calculation);
+                    updatedCount++;
+                } else {
+                    payrollRecords.push(calculation);
+                    successCount++;
+                }
             });
-            
+
             saveData('records');
 
             let message = `役員一括計算完了\n\n`;
-            message += `✅ 計算・保存: ${successCount}名\n`;
+            if (successCount > 0) message += `✅ 新規作成: ${successCount}名\n`;
+            if (updatedCount > 0) message += `🔄 上書き再計算: ${updatedCount}名\n`;
             if (skipCount > 0) {
-                message += `⏭️ スキップ（既存）: ${skipCount}名\n`;
+                message += `⏭️ スキップ（既存・未上書き）: ${skipCount}名\n`;
             }
 
             // 住民税¥0の役員を検出して警告
@@ -18399,7 +18420,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.1
                     </div>
                 </div>
             `;
@@ -18862,6 +18883,338 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             out += log.slice(0, 20).join('\n');
             if (log.length > 20) out += `\n…他 ${log.length - 20} 件`;
             alert(out);
+        }
+
+        // ============================================================
+        // 給与計算データ診断 (v2.6.1)
+        // 各レコードを「正規値」と1項目ずつ比較し、ズレを可視化＋自動修正可能にする
+        // ============================================================
+
+        /**
+         * 1名分の「正規値（canonical）」を計算する。
+         * 既存レコードがあれば basePay/commission/allowance/deduction はそれを流用、
+         * なければ emp.monthlySalary 等から想定値を生成。
+         * @returns {{gross,health,pension,care,childSupport,employment,incomeTax,residentTax,totalDed,netSalary,
+         *            commuteTotal,commuteNonTaxable,taxableForIncomeTax,onLeave,age,notes}}
+         */
+        function computeCanonical(emp, month, existingRec) {
+            const rates = getCurrentRates(month) || { employmentEmployee: 0.6 };
+            const ins = getInsuranceStatusAtMonth(emp, month);
+            const onLeave = isOnLeave(emp);
+
+            const basePay    = existingRec ? (existingRec.basePay || 0) :
+                (emp.salary === 'hourly'
+                    ? Math.floor((emp.hourlyWage || 0) * (emp.baseHours || 0))
+                    : (emp.monthlySalary || 0));
+            const commission = existingRec ? (existingRec.commission || 0) : 0;
+            const allowance  = existingRec ? (existingRec.allowance || 0) : 0;
+            const deduction  = existingRec ? (existingRec.deduction || 0) : 0;
+
+            const commute = splitCommuteAllowance(
+                emp.commuteAllowanceMonthly || 0,
+                emp.commuteIsPublicTransport !== false);
+            // 役員で通勤手当が未登録なら commute は含めない
+            const includeCommute = (emp.type !== 'executive') || ((emp.commuteAllowanceMonthly || 0) > 0);
+            const commuteTotal      = includeCommute ? commute.total : 0;
+            const commuteNonTaxable = includeCommute ? commute.nonTaxable : 0;
+
+            const grossSalary = basePay + commission + allowance + commuteTotal - deduction;
+
+            const health       = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+            const pension      = (!onLeave &amp;&amp; ins.pension)      ? (emp.pensionAmount || 0) : 0;
+            const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
+            const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
+            const employment   = (ins.employment &amp;&amp; emp.type !== 'executive')
+                ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
+            const taxableForIncomeTax = Math.max(0,
+                grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
+            const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
+            const residentTax  = emp.residentTax || 0;
+            const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
+            const netSalary    = grossSalary - totalDed;
+
+            return {
+                grossSalary, health, pension, care, childSupport, employment,
+                incomeTax, residentTax, totalDed, netSalary,
+                commuteTotal, commuteNonTaxable, taxableForIncomeTax,
+                onLeave, age: ins.age, notes: ins.notes,
+                basePay, commission, allowance, deduction,
+            };
+        }
+
+        /**
+         * 標準報酬月額から「あるべき社保額」を返す。マスタ整合性チェック用。
+         */
+        function computeExpectedInsuranceFromStandard(emp) {
+            if (!emp || !emp.healthCheck) return null;
+            const std = emp.standardRemuneration;
+            if (!std) return null;
+            const pref = emp.prefecture || 'tokyo';
+            const hr = getHealthRate(pref);
+            const pensionStd = Math.min(std, PENSION_MAX_STANDARD);
+            return {
+                health:       roundShakai(std * hr / 100 / 2),
+                pension:      emp.pensionCheck ? roundShakai(pensionStd * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0,
+                care:         emp.careCheck    ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0,
+                childSupport: roundShakai(std * PAYROLL_CONSTANTS.childSupportRate / 100 / 2),
+                std, pref, healthRate: hr,
+            };
+        }
+
+        /**
+         * 給与計算データ診断モーダルを開く。
+         * 1. 従業員マスタの整合性チェック (標報 vs 健保額、子育て支援金未登録、住民税未登録 等)
+         * 2. 給与レコードの各項目を「正規値」と1つずつ比較
+         * 3. ズレを赤字で表示し、「自動修正」ボタンで一括 fix
+         */
+        function diagnosePayrollIntegrity() {
+            const month = document.getElementById('list-month').value;
+            if (!month) {
+                alert('対象年月を選択してください（給与一覧 上部の月選択）');
+                return;
+            }
+            const records = payrollRecords.filter(r => r.month === month);
+            const activeEmps = employees.filter(isActiveEmployee);
+
+            // ----- 検査1: 従業員マスタの品質 -----
+            const masterIssues = [];
+            activeEmps.forEach(emp => {
+                const isExec = emp.type === 'executive';
+                if (emp.healthCheck) {
+                    const expected = computeExpectedInsuranceFromStandard(emp);
+                    if (!expected) {
+                        masterIssues.push({
+                            empId: emp.id, name: emp.name, severity: 'high',
+                            field: '標準報酬月額', current: '未登録', expected: '算定基礎届で確定',
+                            note: '標報未登録のため自動再計算不能。マスタ画面で手入力するか算定基礎届を実行してください',
+                        });
+                    } else {
+                        const checks = [
+                            ['健康保険料', emp.healthAmount || 0, expected.health],
+                            ['厚生年金保険料', emp.pensionAmount || 0, expected.pension],
+                            ['介護保険料', emp.careAmount || 0, expected.care],
+                            ['子育て支援金', emp.childSupportAmount || 0, expected.childSupport],
+                        ];
+                        checks.forEach(([field, cur, exp]) => {
+                            // 介護は40-64歳のみ、emp.careCheck=false なら exp=0 で当然
+                            if (Math.abs(cur - exp) > 1) {
+                                masterIssues.push({
+                                    empId: emp.id, name: emp.name,
+                                    severity: cur === 0 &amp;&amp; exp > 0 ? 'high' : 'med',
+                                    field, current: cur, expected: exp,
+                                    note: `標準報酬月額 ¥${expected.std.toLocaleString('ja-JP')} × 現行料率`,
+                                });
+                            }
+                        });
+                    }
+                }
+                if (!isExec &amp;&amp; (emp.residentTax || 0) === 0) {
+                    masterIssues.push({
+                        empId: emp.id, name: emp.name, severity: 'low',
+                        field: '住民税', current: 0, expected: '?',
+                        note: '住民税未登録（新入社員で前年所得なし or マスタ未入力）',
+                    });
+                }
+                if (!emp.standardRemuneration &amp;&amp; emp.healthCheck) {
+                    // 重複報告を避けるため上で報告済み
+                }
+                if ((emp.dependents == null) || isNaN(emp.dependents)) {
+                    masterIssues.push({
+                        empId: emp.id, name: emp.name, severity: 'med',
+                        field: '扶養人数', current: emp.dependents, expected: '0以上の整数',
+                        note: '扶養人数が未設定。月額表の引き方が変わります',
+                    });
+                }
+            });
+
+            // ----- 検査2: 給与レコードの整合性 -----
+            const recordIssues = []; // [{rec, emp, diffs:[{field,cur,exp}]}]
+            const okRecs = [];
+            records.forEach(rec => {
+                const emp = activeEmps.find(e => e.id === rec.empId);
+                if (!emp) {
+                    recordIssues.push({
+                        rec, emp: null,
+                        diffs: [{ field: '従業員マスタ', cur: 'なし', exp: '存在' }],
+                    });
+                    return;
+                }
+                const canon = computeCanonical(emp, month, rec);
+                const fields = [
+                    ['総支給', rec.grossSalary, canon.grossSalary],
+                    ['健保', rec.health || 0, canon.health],
+                    ['年金', rec.pension || 0, canon.pension],
+                    ['介護', rec.care || 0, canon.care],
+                    ['支援金', rec.childSupport || 0, canon.childSupport],
+                    ['雇用', rec.employment || 0, canon.employment],
+                    ['所得税', rec.incomeTax || 0, canon.incomeTax],
+                    ['住民税', rec.residentTax || 0, canon.residentTax],
+                    ['控除計', rec.totalDed || 0, canon.totalDed],
+                    ['差引支給', rec.netSalary || 0, canon.netSalary],
+                ];
+                const diffs = fields.filter(([_, c, e]) => Math.abs((c || 0) - (e || 0)) > 1)
+                    .map(([field, cur, exp]) => ({ field, cur, exp }));
+                if (diffs.length === 0) okRecs.push({ rec, emp });
+                else recordIssues.push({ rec, emp, diffs, canon });
+            });
+
+            // ----- 検査3: 対象月にレコードがない従業員 -----
+            const recordedIds = new Set(records.map(r => r.empId));
+            const missingEmps = activeEmps.filter(e => !recordedIds.has(e.id));
+
+            showDiagnosticsModal({
+                month, masterIssues, recordIssues, okRecs, missingEmps,
+                totalEmps: activeEmps.length,
+                totalRecords: records.length,
+            });
+        }
+
+        function showDiagnosticsModal(result) {
+            const { month, masterIssues, recordIssues, okRecs, missingEmps, totalEmps, totalRecords } = result;
+            const f = formatCurrency;
+            const sev = s => s === 'high' ? '🔴' : s === 'med' ? '🟡' : '🔵';
+
+            // モーダル DOM 構築
+            let modal = document.getElementById('diagnostics-modal');
+            if (modal) modal.remove();
+            modal = document.createElement('div');
+            modal.id = 'diagnostics-modal';
+            modal.style.cssText = `
+                position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999;
+                display:flex; align-items:flex-start; justify-content:center;
+                padding:30px 16px; overflow-y:auto;
+            `;
+
+            let html = `
+                <div style=&quot;background:white; border-radius:12px; max-width:1100px; width:100%;
+                            padding:24px; box-shadow:0 20px 60px rgba(0,0,0,0.3); max-height:85vh; overflow-y:auto;&quot;>
+                    <div style=&quot;display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px;&quot;>
+                        <h2 style=&quot;margin:0; font-size:20px; color:#1e293b;&quot;>🔍 給与計算データ診断 (${month})</h2>
+                        <button onclick=&quot;document.getElementById('diagnostics-modal').remove()&quot;
+                                style=&quot;background:#e2e8f0; border:none; border-radius:6px; padding:6px 12px; cursor:pointer;&quot;>✕ 閉じる</button>
+                    </div>
+                    <div style=&quot;display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;&quot;>
+                        <div style=&quot;background:#f0f9ff; padding:12px; border-radius:8px;&quot;>
+                            <div style=&quot;font-size:11px; color:#0369a1;&quot;>有効従業員</div>
+                            <div style=&quot;font-size:24px; font-weight:700; color:#0c4a6e;&quot;>${totalEmps}名</div>
+                        </div>
+                        <div style=&quot;background:#f0fdf4; padding:12px; border-radius:8px;&quot;>
+                            <div style=&quot;font-size:11px; color:#15803d;&quot;>レコードあり</div>
+                            <div style=&quot;font-size:24px; font-weight:700; color:#14532d;&quot;>${totalRecords}件</div>
+                        </div>
+                        <div style=&quot;background:${recordIssues.length > 0 ? '#fef2f2' : '#f9fafb'}; padding:12px; border-radius:8px;&quot;>
+                            <div style=&quot;font-size:11px; color:${recordIssues.length > 0 ? '#b91c1c' : '#6b7280'};&quot;>レコード不整合</div>
+                            <div style=&quot;font-size:24px; font-weight:700; color:${recordIssues.length > 0 ? '#7f1d1d' : '#374151'};&quot;>${recordIssues.length}件</div>
+                        </div>
+                        <div style=&quot;background:${masterIssues.length > 0 ? '#fefce8' : '#f9fafb'}; padding:12px; border-radius:8px;&quot;>
+                            <div style=&quot;font-size:11px; color:${masterIssues.length > 0 ? '#a16207' : '#6b7280'};&quot;>マスタ警告</div>
+                            <div style=&quot;font-size:24px; font-weight:700; color:${masterIssues.length > 0 ? '#713f12' : '#374151'};&quot;>${masterIssues.length}件</div>
+                        </div>
+                    </div>
+            `;
+
+            // ----- セクション: マスタ警告 -----
+            if (masterIssues.length > 0) {
+                html += `<h3 style=&quot;font-size:15px; margin:18px 0 8px; color:#7c2d12;&quot;>① 従業員マスタの警告</h3>`;
+                html += `<div style=&quot;background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px; margin-bottom:8px; font-size:12px; color:#7c2d12;&quot;>
+                    📝 マスタ警告を直すには:<br>
+                    　・健保/年金/介護/支援金 → 従業員マスタタブの<strong>「♻ 全員の社保額を最新料率で再計算」</strong>ボタン<br>
+                    　・標準報酬月額未登録 → 算定基礎届タブで4-6月平均から確定<br>
+                    　・住民税未登録 → 自治体から届く特別徴収税額決定通知書を見て手入力（5月頃通知、6月から徴収）
+                </div>`;
+                html += `<table style=&quot;width:100%; border-collapse:collapse; font-size:12px;&quot;>
+                    <thead><tr style=&quot;background:#fed7aa; color:#7c2d12;&quot;>
+                        <th style=&quot;padding:8px; text-align:left;&quot;>重要度</th>
+                        <th style=&quot;padding:8px; text-align:left;&quot;>従業員</th>
+                        <th style=&quot;padding:8px; text-align:left;&quot;>項目</th>
+                        <th style=&quot;padding:8px; text-align:right;&quot;>現在値</th>
+                        <th style=&quot;padding:8px; text-align:right;&quot;>あるべき値</th>
+                        <th style=&quot;padding:8px; text-align:left;&quot;>備考</th>
+                    </tr></thead><tbody>`;
+                masterIssues.forEach(iss => {
+                    html += `<tr style=&quot;border-bottom:1px solid #e2e8f0;&quot;>
+                        <td style=&quot;padding:6px 8px;&quot;>${sev(iss.severity)}</td>
+                        <td style=&quot;padding:6px 8px;&quot;>${escapeHtml(iss.name)}</td>
+                        <td style=&quot;padding:6px 8px;&quot;>${iss.field}</td>
+                        <td style=&quot;padding:6px 8px; text-align:right; color:#dc2626; font-weight:600;&quot;>${typeof iss.current === 'number' ? f(iss.current) : iss.current}</td>
+                        <td style=&quot;padding:6px 8px; text-align:right; color:#16a34a; font-weight:600;&quot;>${typeof iss.expected === 'number' ? f(iss.expected) : iss.expected}</td>
+                        <td style=&quot;padding:6px 8px; color:#475569; font-size:11px;&quot;>${escapeHtml(iss.note || '')}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table>`;
+            }
+
+            // ----- セクション: 未計算従業員 -----
+            if (missingEmps.length > 0) {
+                html += `<h3 style=&quot;font-size:15px; margin:18px 0 8px; color:#6b21a8;&quot;>② 対象月の給与レコードが未作成の従業員 (${missingEmps.length}名)</h3>`;
+                html += `<div style=&quot;background:#faf5ff; border:1px solid #d8b4fe; border-radius:8px; padding:10px; font-size:12px;&quot;>`;
+                html += missingEmps.map(e => `<span style=&quot;display:inline-block; background:#e9d5ff; color:#581c87; padding:2px 8px; border-radius:4px; margin:2px;&quot;>${escapeHtml(e.name)} (${e.type})</span>`).join('');
+                html += `<div style=&quot;margin-top:8px; color:#581c87;&quot;>→ 給与計算タブで個別計算するか、役員なら「役員を一括計算」を実行してください</div>`;
+                html += `</div>`;
+            }
+
+            // ----- セクション: レコード不整合 -----
+            if (recordIssues.length > 0) {
+                html += `<h3 style=&quot;font-size:15px; margin:18px 0 8px; color:#991b1b;&quot;>③ 既存給与レコードの不整合 (${recordIssues.length}件)</h3>`;
+                html += `<div style=&quot;background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:10px; margin-bottom:8px; font-size:12px; color:#7f1d1d;&quot;>
+                    🔴 = 高（金額差大） / 🟡 = 中 / 🔵 = 軽微（端数）<br>
+                    下の「🔧 全件を正規値で自動修正」を押すと、全部の不整合を一括修正します。<br>
+                    （内部的には「♻ 対象月の給与を全員再計算」と同じ動きですが、こちらは事前にどこが変わるか目視確認できます）
+                </div>`;
+                html += `<table style=&quot;width:100%; border-collapse:collapse; font-size:11px;&quot;>
+                    <thead><tr style=&quot;background:#fecaca; color:#7f1d1d;&quot;>
+                        <th style=&quot;padding:6px; text-align:left;&quot;>従業員</th>
+                        <th style=&quot;padding:6px; text-align:left;&quot;>項目</th>
+                        <th style=&quot;padding:6px; text-align:right;&quot;>現在</th>
+                        <th style=&quot;padding:6px;&quot;>→</th>
+                        <th style=&quot;padding:6px; text-align:right;&quot;>正規</th>
+                        <th style=&quot;padding:6px; text-align:right;&quot;>差</th>
+                    </tr></thead><tbody>`;
+                recordIssues.forEach(({ rec, emp, diffs }) => {
+                    diffs.forEach((d, i) => {
+                        const diffVal = (d.exp || 0) - (d.cur || 0);
+                        const sevIcon = Math.abs(diffVal) > 1000 ? '🔴' : Math.abs(diffVal) > 100 ? '🟡' : '🔵';
+                        html += `<tr style=&quot;border-bottom:1px solid #f3f4f6;&quot;>
+                            <td style=&quot;padding:5px 6px;&quot;>${i === 0 ? `${sevIcon} ${escapeHtml(rec.empName || (emp &amp;&amp; emp.name) || rec.empId)}` : ''}</td>
+                            <td style=&quot;padding:5px 6px;&quot;>${d.field}</td>
+                            <td style=&quot;padding:5px 6px; text-align:right; color:#dc2626;&quot;>${typeof d.cur === 'number' ? f(d.cur) : d.cur}</td>
+                            <td style=&quot;padding:5px 6px; text-align:center; color:#6b7280;&quot;>→</td>
+                            <td style=&quot;padding:5px 6px; text-align:right; color:#16a34a; font-weight:600;&quot;>${typeof d.exp === 'number' ? f(d.exp) : d.exp}</td>
+                            <td style=&quot;padding:5px 6px; text-align:right; color:${diffVal >= 0 ? '#16a34a' : '#dc2626'};&quot;>${diffVal >= 0 ? '+' : ''}${typeof diffVal === 'number' ? f(diffVal) : '?'}</td>
+                        </tr>`;
+                    });
+                });
+                html += `</tbody></table>`;
+            }
+
+            // ----- セクション: OK -----
+            if (recordIssues.length === 0 &amp;&amp; masterIssues.length === 0 &amp;&amp; missingEmps.length === 0) {
+                html += `<div style=&quot;background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:20px; text-align:center;&quot;>
+                    <div style=&quot;font-size:48px;&quot;>✅</div>
+                    <div style=&quot;font-size:18px; font-weight:700; color:#14532d; margin-top:8px;&quot;>すべての数値が正規値と一致しています</div>
+                    <div style=&quot;color:#15803d; margin-top:4px;&quot;>${month} の給与計算データに不整合はありません。</div>
+                </div>`;
+            }
+
+            // ----- アクションボタン -----
+            html += `<div style=&quot;margin-top:20px; padding-top:16px; border-top:1px solid #e2e8f0; display:flex; gap:10px; flex-wrap:wrap;&quot;>`;
+            if (masterIssues.some(i => i.field !== '住民税' &amp;&amp; i.field !== '標準報酬月額' &amp;&amp; i.field !== '扶養人数')) {
+                html += `<button onclick=&quot;recalcAllInsuranceAmounts(); document.getElementById('diagnostics-modal').remove();&quot;
+                    style=&quot;background:#16a34a; color:white; border:none; padding:10px 16px; border-radius:6px; font-weight:600; cursor:pointer;&quot;>♻ 全員の社保額を最新料率で再計算</button>`;
+            }
+            if (recordIssues.length > 0) {
+                html += `<button onclick=&quot;recalcAllPayrollForMonth(); document.getElementById('diagnostics-modal').remove();&quot;
+                    style=&quot;background:#dc2626; color:white; border:none; padding:10px 16px; border-radius:6px; font-weight:600; cursor:pointer;&quot;>🔧 全件を正規値で自動修正</button>`;
+            }
+            html += `<button onclick=&quot;document.getElementById('diagnostics-modal').remove()&quot;
+                    style=&quot;background:#e2e8f0; color:#1e293b; border:none; padding:10px 16px; border-radius:6px; cursor:pointer; margin-left:auto;&quot;>閉じる</button>`;
+            html += `</div></div>`;
+
+            modal.innerHTML = html;
+            document.body.appendChild(modal);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.remove();
+            });
         }
 
         /**
