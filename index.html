@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.6 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.7 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -15115,6 +15115,50 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-payperiod&quot; placeholder=&quot;例: 当月1日〜当月末日 / 前月21日〜当月20日&quot;>
                         </div>
                     </div>
+
+                    <h3 style=&quot;margin: 24px 0 10px 0; font-size: 16px; color: var(--primary);&quot;>🏦 全銀協 振込元情報（給与一覧の「振込データ作成」用）</h3>
+                    <div class=&quot;info-box info-box-blue&quot;>
+                        💡 銀行のネットバンキングに全銀協ファイルを取り込むために必要な、<strong>会社の振込元口座情報</strong>です。<br>
+                        <strong>取引銀行から「委託者コード」</strong>（10桁）を受け取り、ここに登録してください。委託者名は半角カナで（例: 「ﾕｳｹﾞﾝｶﾞｲｼﾔﾉｳﾞｱ」）
+                    </div>
+                    <div class=&quot;form-grid&quot;>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>委託者コード（銀行発行 10桁） ※</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-requester-code&quot; maxlength=&quot;10&quot; placeholder=&quot;例: 1234567890&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>委託者名（半角カナ 30字以内） ※</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-requester-name&quot; maxlength=&quot;30&quot; placeholder=&quot;例: ﾕｳｹﾞﾝｶﾞｲｼﾔﾉｳﾞｱ&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>振込元 銀行コード（4桁）</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-src-bank-code&quot; maxlength=&quot;4&quot; placeholder=&quot;例: 0001（みずほ）&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>振込元 銀行名（半角カナ）</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-src-bank-name&quot; maxlength=&quot;15&quot; placeholder=&quot;例: ﾐｽﾞﾎ&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>振込元 支店コード（3桁）</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-src-branch-code&quot; maxlength=&quot;3&quot; placeholder=&quot;例: 001&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>振込元 支店名（半角カナ）</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-src-branch-name&quot; maxlength=&quot;15&quot; placeholder=&quot;例: ﾄｳｷﾖｳ&quot;>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>振込元 預金種目</label>
+                            <select class=&quot;form-select&quot; id=&quot;company-zengin-src-account-type&quot;>
+                                <option value=&quot;1&quot;>普通</option>
+                                <option value=&quot;2&quot;>当座</option>
+                            </select>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>振込元 口座番号（7桁）</label>
+                            <input type=&quot;text&quot; class=&quot;form-input&quot; id=&quot;company-zengin-src-account-number&quot; maxlength=&quot;7&quot; placeholder=&quot;例: 1234567&quot;>
+                        </div>
+                    </div>
+
                     <div class=&quot;btn-group&quot;>
                         <button type=&quot;submit&quot; class=&quot;btn btn-primary&quot;>保存</button>
                     </div>
@@ -16329,6 +16373,15 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             payDay:        '当月25日',
             // 賃金計算期間（締日）。例: '前月21日〜当月20日'
             payPeriod:     '当月1日〜当月末日',
+            // 全銀協 振込元（仕向）情報。銀行から指定される値。
+            zenginRequesterCode:    '',    // 委託者コード (10桁、銀行発行)
+            zenginRequesterNameKana:'',    // 委託者名（半角カナ、30字以内）
+            zenginSrcBankCode:      '',    // 仕向銀行コード (4桁)
+            zenginSrcBankName:      '',    // 仕向銀行名（半角カナ、15字以内）
+            zenginSrcBranchCode:    '',    // 仕向支店コード (3桁)
+            zenginSrcBranchName:    '',    // 仕向支店名（半角カナ、15字以内）
+            zenginSrcAccountType:   '1',   // 預金種目 '1':普通 / '2':当座
+            zenginSrcAccountNumber: '',    // 口座番号 (7桁)
         };
         const empTypeGuides = {
             regular: {
@@ -16794,20 +16847,39 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             set('company-phone',     companyInfo.phone);
             set('company-payday',    companyInfo.payDay);
             set('company-payperiod', companyInfo.payPeriod);
+            // 全銀協 振込元情報
+            set('company-zengin-requester-code',     companyInfo.zenginRequesterCode);
+            set('company-zengin-requester-name',     companyInfo.zenginRequesterNameKana);
+            set('company-zengin-src-bank-code',      companyInfo.zenginSrcBankCode);
+            set('company-zengin-src-bank-name',      companyInfo.zenginSrcBankName);
+            set('company-zengin-src-branch-code',    companyInfo.zenginSrcBranchCode);
+            set('company-zengin-src-branch-name',    companyInfo.zenginSrcBranchName);
+            set('company-zengin-src-account-type',   companyInfo.zenginSrcAccountType || '1');
+            set('company-zengin-src-account-number', companyInfo.zenginSrcAccountNumber);
         }
 
         function handleCompanyInfoSubmit(e) {
             e.preventDefault();
+            const get = (id) => (document.getElementById(id)?.value || '').trim();
             companyInfo = {
-                name:           document.getElementById('company-name').value.trim(),
-                representative: document.getElementById('company-rep').value.trim(),
-                address:        document.getElementById('company-address').value.trim(),
-                phone:          document.getElementById('company-phone').value.trim(),
-                payDay:         document.getElementById('company-payday').value.trim(),
-                payPeriod:      document.getElementById('company-payperiod').value.trim(),
+                name:           get('company-name'),
+                representative: get('company-rep'),
+                address:        get('company-address'),
+                phone:          get('company-phone'),
+                payDay:         get('company-payday'),
+                payPeriod:      get('company-payperiod'),
+                // 全銀協 振込元情報
+                zenginRequesterCode:    get('company-zengin-requester-code'),
+                zenginRequesterNameKana:get('company-zengin-requester-name'),
+                zenginSrcBankCode:      get('company-zengin-src-bank-code'),
+                zenginSrcBankName:      get('company-zengin-src-bank-name'),
+                zenginSrcBranchCode:    get('company-zengin-src-branch-code'),
+                zenginSrcBranchName:    get('company-zengin-src-branch-name'),
+                zenginSrcAccountType:   get('company-zengin-src-account-type') || '1',
+                zenginSrcAccountNumber: get('company-zengin-src-account-number'),
             };
             saveData('companyInfo');
-            alert('会社情報を保存しました（明細書・賞与明細書に反映されます）');
+            alert('会社情報を保存しました（明細書・賞与明細書・全銀協振込ファイルに反映されます）');
         }
         function switchTab(tab, ev) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
@@ -18675,7 +18747,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.6
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.7
                     </div>
                 </div>
             `;
@@ -20448,38 +20520,52 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         function exportZenginFormat(month, filtered) {
+            // 振込元情報の必須チェック
+            const missing = [];
+            if (!companyInfo.zenginRequesterCode)     missing.push('委託者コード（10桁）');
+            if (!companyInfo.zenginRequesterNameKana) missing.push('委託者名（半角カナ）');
+            if (!companyInfo.zenginSrcBankCode)       missing.push('振込元 銀行コード');
+            if (!companyInfo.zenginSrcBankName)       missing.push('振込元 銀行名');
+            if (!companyInfo.zenginSrcBranchCode)     missing.push('振込元 支店コード');
+            if (!companyInfo.zenginSrcBranchName)     missing.push('振込元 支店名');
+            if (!companyInfo.zenginSrcAccountNumber)  missing.push('振込元 口座番号');
+            if (missing.length > 0) {
+                alert(`⚠️ 全銀協ファイルの出力前に、以下の振込元情報を登録してください:\n\n${missing.map(m => '• ' + m).join('\n')}\n\n設定タブ → 「会社情報マスタ」 → 「🏦 全銀協 振込元情報」セクションで登録してください。\n\n（取引銀行から「給与振込サービスの委託者コード」をもらってください）`);
+                if (typeof switchTab === 'function') switchTab('settings');
+                return;
+            }
+
             const today = new Date();
             const yymmdd = `${String(today.getFullYear()).slice(2)}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
             const mmdd = `${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
 
-            // 委託者（会社）情報。本来は銀行から指定されたコード。ダミー値で生成（用紙で実際の値に書き換え）
-            const requesterCode = padZeroLeft(0, 10); // 委託者コード 10桁（要設定）
-            const requesterName = padBytesRight(toHalfKana((companyInfo.name || '').replace(/有限会社|株式会社/g, '').trim()), 40);
+            const requesterCode = padZeroLeft(parseInt(companyInfo.zenginRequesterCode) || 0, 10);
+            const requesterName = padBytesRight(toHalfKana(companyInfo.zenginRequesterNameKana), 40);
 
-            // ヘッダーレコード (120バイト、SJIS換算で 120文字相当)
+            // ヘッダーレコード (120バイト)
             // 1:データ区分(1) = '1'
             // 2:種別コード(2) = '21'(給与振込)
             // 3:コード区分(1) = '0'(JIS)
             // 4:委託者コード(10)
             // 5:委託者名(40)
             // 6:取組日(MMDD,4)
-            // 7:仕向銀行番号(4) ※会社の口座銀行 - 未設定なら 0000
+            // 7:仕向銀行番号(4)
             // 8:仕向銀行名(15)
             // 9:仕向支店番号(3)
             // 10:仕向支店名(15)
             // 11:預金種目(1)
             // 12:口座番号(7)
-            // 13:ダミー(17) ※全角空白
+            // 13:ダミー(17)
             const header = '1' + '21' + '0' +
                 requesterCode +
                 requesterName +
                 mmdd +
-                '0000' +                          // 仕向銀行番号（未設定）
-                padBytesRight('', 15) +            // 仕向銀行名
-                '000' +                            // 仕向支店番号
-                padBytesRight('', 15) +            // 仕向支店名
-                '1' +                              // 預金種目（普通）
-                '0000000' +                        // 仕向口座番号
+                padZeroLeft(parseInt(companyInfo.zenginSrcBankCode)   || 0, 4) +
+                padBytesRight(toHalfKana(companyInfo.zenginSrcBankName), 15) +
+                padZeroLeft(parseInt(companyInfo.zenginSrcBranchCode) || 0, 3) +
+                padBytesRight(toHalfKana(companyInfo.zenginSrcBranchName), 15) +
+                String(companyInfo.zenginSrcAccountType || '1').slice(0, 1) +
+                padZeroLeft(parseInt(companyInfo.zenginSrcAccountNumber) || 0, 7) +
                 ' '.repeat(17);
 
             // データレコード
@@ -20541,7 +20627,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             a.download = `zengin_${month}.txt`;
             a.click();
             URL.revokeObjectURL(a.href);
-            alert(`全銀協形式の振込データを出力しました\n\n対象月: ${month}\n対象: ${totalCount}名\n合計: ${formatCurrency(totalAmount)}\n\n⚠️ 重要:\n• 委託者コード(10桁)は銀行から指定された値に書き換えてください\n• 仕向銀行・口座情報は会社の振込元口座を設定してください\n• 文字コードは Shift_JIS が正式（UTF-8で出力済み、必要に応じて変換）`);
+            alert(`✅ 全銀協形式の振込データを出力しました\n\n対象月: ${month}\n対象: ${totalCount}名\n合計: ${formatCurrency(totalAmount)}\n\n📁 ファイル: zengin_${month}.txt\n\n📋 銀行への取込手順:\n1. ファイルをネットバンキングの「ファイル伝送」「給与振込」等のメニューにアップロード\n2. 振込指定日（取組日）を確認\n3. 内容確認後に承認\n\n⚠️ 文字コードについて:\n全銀協の正式仕様は Shift_JIS です。多くの銀行は UTF-8 でも受け付けますが、エラーが出る場合はメモ帳で開いて「名前を付けて保存」→ 文字コードを Shift_JIS（ANSI）に変更してください。`);
         }
 
         function exportSimpleCSV(month, filtered) {
