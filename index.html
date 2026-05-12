@@ -14896,7 +14896,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     <table class=&quot;table&quot; id=&quot;payroll-table&quot;>
                         <thead>
                             <tr>
-                                <th>ID</th><th>氏名</th><th>年月</th><th>基本給</th><th>歩合/時給</th><th>手当</th><th>控除</th>
+                                <th>ID</th><th>氏名</th><th>年月</th><th title=&quot;扶養人数。月額表 (甲欄) の引き方を決める。多いほど所得税が減る&quot;>扶養</th><th>基本給</th><th>歩合/時給</th><th>手当</th><th>控除</th>
                                 <th>総支給</th><th>健保</th><th>年金</th><th>介護</th><th>支援金</th><th>雇用</th>
                                 <th>所得税</th><th>住民税</th><th>控除計</th><th>差引支給</th><th class=&quot;no-print&quot;>操作</th>
                             </tr>
@@ -14904,7 +14904,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <tbody id=&quot;payroll-tbody&quot;></tbody>
                         <tfoot style=&quot;display: none;&quot; class=&quot;print-total-row&quot;>
                             <tr class=&quot;print-total-row&quot;>
-                                <td colspan=&quot;16&quot; style=&quot;border: none;&quot;></td>
+                                <td colspan=&quot;17&quot; style=&quot;border: none;&quot;></td>
                                 <td class=&quot;print-total-cell&quot;>月次振込金額合計: <span id=&quot;total-payment-print&quot;>¥0</span></td>
                             </tr>
                         </tfoot>
@@ -17819,10 +17819,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             let total = 0;
             filtered.forEach(rec => {
                 total += rec.netSalary;
+                const emp = employees.find(e => e.id === rec.empId);
+                const dep = emp ? (emp.dependents || 0) : '?';
+                const depColor = (emp &amp;&amp; (emp.dependents || 0) >= 2) ? '#fef3c7' : '';
                 const row = tbody.insertRow();
                 row.innerHTML = `
                     <td style=&quot;font-size:10px;&quot;>${rec.empId}</td><td style=&quot;font-size:10px;&quot;>${rec.empName}</td>
                     <td style=&quot;font-size:10px;&quot;>${rec.month}</td>
+                    <td class=&quot;text-right&quot; style=&quot;font-size:10px;background:${depColor};font-weight:600;&quot; title=&quot;扶養人数（2人以上だと月額表で所得税が大幅に下がる）&quot;>${dep}人</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.basePay)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.commission||0)}</td>
                     <td class=&quot;text-right&quot; style=&quot;font-size:9px;&quot;>${formatCurrency(rec.allowance)}</td>
@@ -19171,11 +19175,12 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <th style=&quot;padding:6px; text-align:right;&quot;>差</th>
                     </tr></thead><tbody>`;
                 recordIssues.forEach(({ rec, emp, diffs }) => {
+                    const depStr = emp ? `（扶養${emp.dependents || 0}人）` : '';
                     diffs.forEach((d, i) => {
                         const diffVal = (d.exp || 0) - (d.cur || 0);
                         const sevIcon = Math.abs(diffVal) > 1000 ? '🔴' : Math.abs(diffVal) > 100 ? '🟡' : '🔵';
                         html += `<tr style=&quot;border-bottom:1px solid #f3f4f6;&quot;>
-                            <td style=&quot;padding:5px 6px;&quot;>${i === 0 ? `${sevIcon} ${escapeHtml(rec.empName || (emp &amp;&amp; emp.name) || rec.empId)}` : ''}</td>
+                            <td style=&quot;padding:5px 6px;&quot;>${i === 0 ? `${sevIcon} ${escapeHtml(rec.empName || (emp &amp;&amp; emp.name) || rec.empId)}<span style=&quot;font-size:10px;color:#6b7280;&quot;>${depStr}</span>` : ''}</td>
                             <td style=&quot;padding:5px 6px;&quot;>${d.field}</td>
                             <td style=&quot;padding:5px 6px; text-align:right; color:#dc2626;&quot;>${typeof d.cur === 'number' ? f(d.cur) : d.cur}</td>
                             <td style=&quot;padding:5px 6px; text-align:center; color:#6b7280;&quot;>→</td>
