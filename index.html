@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.5 - PayCalc Pro</title>
+    <title>給与計算システム v2.6 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14734,9 +14734,12 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 </form>
             </div>
             <div class=&quot;card&quot;>
-                <div class=&quot;card-header&quot; style=&quot;display: flex; justify-content: space-between; align-items: center;&quot;>
+                <div class=&quot;card-header&quot; style=&quot;display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;&quot;>
                     <span>従業員一覧</span>
-                    <button class=&quot;btn btn-secondary&quot; onclick=&quot;printEmployeeList()&quot; style=&quot;margin: 0; padding: 8px 16px; font-size: 13px;&quot;>従業員一覧を印刷</button>
+                    <div style=&quot;display:flex; gap:8px; flex-wrap:wrap;&quot;>
+                        <button class=&quot;btn btn-success&quot; onclick=&quot;recalcAllInsuranceAmounts()&quot; style=&quot;margin: 0; padding: 8px 16px; font-size: 13px;&quot; title=&quot;標準報酬月額をベースに、現行料率（健保・年金・介護・支援金）で全員の社保額を再計算します&quot;>♻ 全員の社保額を最新料率で再計算</button>
+                        <button class=&quot;btn btn-secondary&quot; onclick=&quot;printEmployeeList()&quot; style=&quot;margin: 0; padding: 8px 16px; font-size: 13px;&quot;>従業員一覧を印刷</button>
+                    </div>
                 </div>
                 <div class=&quot;table-container&quot;>
                     <table class=&quot;table&quot; id=&quot;employee-table&quot;>
@@ -14883,6 +14886,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 <div class=&quot;search-bar&quot;>
                     <input type=&quot;month&quot; class=&quot;search-input&quot; id=&quot;list-month&quot;>
                     <button class=&quot;btn btn-primary&quot; onclick=&quot;filterPayrollList()&quot;>表示</button>
+                    <button class=&quot;btn&quot; onclick=&quot;recalcAllPayrollForMonth()&quot; style=&quot;background:#f59e0b;color:white;&quot; title=&quot;選択中の対象月の全員の給与レコードを、現行の従業員マスタ値（社保額・住民税など）と最新ロジックで再計算します&quot;>♻ 対象月の給与を全員再計算</button>
                     <button class=&quot;btn btn-success&quot; onclick=&quot;showBulkPrintModal()&quot;>給与明細を一括印刷</button>
                     <button class=&quot;btn btn-secondary&quot; onclick=&quot;printPayrollList()&quot;>一覧を印刷</button>
                     <button class=&quot;btn&quot; onclick=&quot;createBankTransferData()&quot; style=&quot;background: #10b981; color: white;&quot;>🏦 振込データ作成</button>
@@ -17093,8 +17097,11 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
                 const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
                 const employment = 0; // 役員は雇用保険なし
-                const incomeTax = calculateIncomeTax(grossSalary, emp.dependents);
-                const residentTax = emp.residentTax;
+                // 所得税は「社会保険料控除後の額」で計算（月額表 甲欄の仕様）
+                const taxableForIncomeTax = Math.max(0,
+                    grossSalary - health - pension - care - childSupport - employment);
+                const incomeTax = calculateIncomeTax(taxableForIncomeTax, emp.dependents);
+                const residentTax = emp.residentTax || 0;
                 const totalDed = health + pension + care + childSupport + employment + incomeTax + residentTax;
                 const netSalary = grossSalary - totalDed;
 
@@ -17234,8 +17241,6 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
             // 総支給額（給与明細表示用）= 基本給 + 歩合 + 諸手当 + 通勤手当 - 控除（欠勤等）
             const grossSalary = basePay + commission + allowance + commute.total - deduction;
-            // 所得税の課税対象額 = 総支給額 - 通勤手当非課税分
-            const taxableGross = grossSalary - commuteNonTaxable;
 
             // 年齢ベースで保険適用を判定（誕生日未登録なら手動チェック値を使用）
             const ins = getInsuranceStatusAtMonth(emp, month);
@@ -17247,9 +17252,13 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
             const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
             const employment   = ins.employment ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
-            // 所得税は通勤手当非課税分を控除した課税対象額で計算
-            const incomeTax    = calculateIncomeTax(taxableGross, emp.dependents);
-            const residentTax  = emp.residentTax;
+            // 所得税は「社会保険料控除後の額（通勤手当非課税分を除く）」で計算
+            // 月額表 甲欄の仕様: 課税対象 = 総支給 − 通勤手当非課税分 − (健保+年金+介護+支援金+雇用)
+            const taxableForIncomeTax = Math.max(0,
+                grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
+            const taxableGross = taxableForIncomeTax; // 履歴の互換用エイリアス
+            const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents);
+            const residentTax  = emp.residentTax || 0;
             const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
             const netSalary    = grossSalary - totalDed;
 
@@ -18390,7 +18399,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.5
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6
                     </div>
                 </div>
             `;
@@ -18689,6 +18698,170 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 });
             }
             localStorage.setItem(FLAG, 'done');
+        }
+
+        /**
+         * 全従業員の社会保険料を「現行料率 × 標準報酬月額」で手動再計算する。
+         * - 標準報酬月額 (emp.standardRemuneration) を基準とする
+         * - 未登録なら healthAmount から逆算 (inferStandardRemuneration)
+         * - 健保・年金・介護・支援金 を roundShakai で再計算
+         * - 都道府県別の健保料率を反映 (FY2026)
+         * - ユーザー操作（ボタン押下）でいつでも実行可
+         */
+        function recalcAllInsuranceAmounts() {
+            const active = employees.filter(emp => emp &amp;&amp; emp.healthCheck);
+            if (active.length === 0) {
+                alert('健康保険加入の従業員がいません。');
+                return;
+            }
+            const msg = `${active.length}名の社会保険料を、現在の料率で再計算しますか？\n\n` +
+                `■ 計算式（労使折半）:\n` +
+                `  健保 = 標準報酬月額 × 都道府県料率 ÷ 2\n` +
+                `  年金 = min(標準報酬月額, ¥${PENSION_MAX_STANDARD.toLocaleString('ja-JP')}) × ${PAYROLL_CONSTANTS.pensionRate}% ÷ 2\n` +
+                `  介護 = 標準報酬月額 × ${PAYROLL_CONSTANTS.careRate}% ÷ 2 (40-64歳のみ)\n` +
+                `  支援金 = 標準報酬月額 × ${PAYROLL_CONSTANTS.childSupportRate}% ÷ 2\n\n` +
+                `※ 標準報酬月額 (emp.standardRemuneration) はそのまま、料率のみ反映`;
+            if (!confirm(msg)) return;
+
+            let updated = 0;
+            const updatedDetails = [];
+            const failed = [];
+            active.forEach(emp => {
+                const std = emp.standardRemuneration || inferStandardRemuneration(emp);
+                if (!std) {
+                    failed.push(emp.name);
+                    return;
+                }
+                emp.standardRemuneration = std;
+                const pref = emp.prefecture || 'tokyo';
+                const hr = getHealthRate(pref);
+                const pensionStd = Math.min(std, PENSION_MAX_STANDARD);
+                const oldHealth = emp.healthAmount || 0;
+                const oldPension = emp.pensionAmount || 0;
+                const oldCare = emp.careAmount || 0;
+                const oldChild = emp.childSupportAmount || 0;
+                emp.healthAmount       = roundShakai(std * hr / 100 / 2);
+                emp.pensionAmount      = emp.pensionCheck ? roundShakai(pensionStd * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0;
+                emp.careAmount         = emp.careCheck    ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
+                emp.childSupportAmount = roundShakai(std * PAYROLL_CONSTANTS.childSupportRate / 100 / 2);
+                const diff = (emp.healthAmount - oldHealth) + (emp.pensionAmount - oldPension)
+                    + (emp.careAmount - oldCare) + (emp.childSupportAmount - oldChild);
+                updatedDetails.push(`${emp.name}: 標報${std.toLocaleString('ja-JP')} 健保${oldHealth.toLocaleString('ja-JP')}→${emp.healthAmount.toLocaleString('ja-JP')} 年金${oldPension.toLocaleString('ja-JP')}→${emp.pensionAmount.toLocaleString('ja-JP')} 介護${oldCare.toLocaleString('ja-JP')}→${emp.careAmount.toLocaleString('ja-JP')} 支援${oldChild.toLocaleString('ja-JP')}→${emp.childSupportAmount.toLocaleString('ja-JP')} (差${diff >= 0 ? '+' : ''}${diff.toLocaleString('ja-JP')})`);
+                updated++;
+            });
+            saveData('employees');
+            updateAllTables();
+
+            let out = `✅ ${updated}名の社会保険料を再計算しました\n\n`;
+            out += updatedDetails.slice(0, 15).join('\n');
+            if (updatedDetails.length > 15) out += `\n…他 ${updatedDetails.length - 15} 名`;
+            if (failed.length > 0) {
+                out += `\n\n⚠️ 推定不能（標報未登録 ＆ 既存値からの逆算失敗）: ${failed.join(', ')}\n`;
+                out += `→ 算定基礎届タブで標準報酬月額を再決定してください`;
+            }
+            out += `\n\n💡 既存の給与レコードへ反映するには、給与一覧タブの「♻ 対象月の給与を全員再計算」を実行してください。`;
+            alert(out);
+        }
+
+        /**
+         * 給与一覧で選択中の対象月について、全員の給与レコードを「現行従業員マスタ ＋ 最新ロジック」で再計算する。
+         * - 既存レコードを上書き
+         * - 入力欄が必要な値（労働時間・歩合・諸手当・控除）は既存レコードの値をそのまま流用
+         * - 社保額は emp.* を現行値で再採用
+         * - 所得税は社保控除後の金額で計算（バグ修正後ロジック）
+         * - 雇用保険・住民税も最新マスタで更新
+         */
+        function recalcAllPayrollForMonth() {
+            const month = document.getElementById('list-month').value;
+            if (!month) {
+                alert('対象年月を選択してください（給与一覧 上部の月選択）');
+                return;
+            }
+            const targets = payrollRecords.filter(r => r.month === month);
+            if (targets.length === 0) {
+                alert(`${month} の給与レコードがありません。\nまず「月次給与計算」タブで個別に計算するか、「役員を一括計算」を実行してください。`);
+                return;
+            }
+            const rates = getCurrentRates(month);
+            if (!rates) {
+                alert('雇用保険料率が設定されていません。料率管理タブで設定してください。');
+                return;
+            }
+            const msg = `${month} の給与レコード ${targets.length} 件を、現行の従業員マスタ値で再計算しますか？\n\n` +
+                `■ 再計算内容:\n` +
+                `  ・健保 / 年金 / 介護 / 支援金 → 従業員マスタの現在値を採用\n` +
+                `  ・雇用保険料 → 総支給 × 現行料率\n` +
+                `  ・所得税 → 社保控除後の額で月額表 (甲欄) 適用 [v2.6 バグ修正]\n` +
+                `  ・住民税 → 従業員マスタの現在値\n` +
+                `  ・基本給 / 歩合 / 諸手当 / 控除 / 労働時間 → 既存レコードを保持\n\n` +
+                `※ 既存レコードを上書きします。`;
+            if (!confirm(msg)) return;
+
+            const log = [];
+            let okCount = 0;
+            let skipCount = 0;
+            targets.forEach(rec => {
+                const emp = employees.find(e => e.id === rec.empId);
+                if (!emp) {
+                    skipCount++;
+                    log.push(`⏭ ${rec.empName || rec.empId}: 従業員マスタにありません`);
+                    return;
+                }
+                const ins = getInsuranceStatusAtMonth(emp, month);
+                const onLeave = isOnLeave(emp);
+                const basePay    = rec.basePay || 0;
+                const commission = rec.commission || 0;
+                const allowance  = rec.allowance || 0;
+                const deduction  = rec.deduction || 0;
+
+                // 通勤手当を従業員マスタから再構築
+                const commute = splitCommuteAllowance(
+                    emp.commuteAllowanceMonthly || 0,
+                    emp.commuteIsPublicTransport !== false);
+
+                // 役員は通勤手当を持たないケースが多いので、既存に含まれていなければ加算しない
+                const includeCommute = (emp.type !== 'executive') || ((emp.commuteAllowanceMonthly || 0) > 0);
+                const commuteTotal       = includeCommute ? commute.total : 0;
+                const commuteNonTaxable  = includeCommute ? commute.nonTaxable : 0;
+                const commuteTaxable     = includeCommute ? commute.taxable : 0;
+
+                const grossSalary = basePay + commission + allowance + commuteTotal - deduction;
+
+                const health       = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+                const pension      = (!onLeave &amp;&amp; ins.pension)      ? (emp.pensionAmount || 0) : 0;
+                const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
+                const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
+                const employment   = (ins.employment &amp;&amp; emp.type !== 'executive')
+                    ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
+                const taxableForIncomeTax = Math.max(0,
+                    grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
+                const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
+                const residentTax  = emp.residentTax || 0;
+                const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
+                const netSalary    = grossSalary - totalDed;
+
+                const oldNet = rec.netSalary;
+                Object.assign(rec, {
+                    empName: emp.name,
+                    empType: emp.type,
+                    grossSalary, taxableGross: taxableForIncomeTax,
+                    commuteTotal, commuteNonTaxable, commuteTaxable,
+                    health, pension, care, childSupport, employment,
+                    incomeTax, residentTax, totalDed, netSalary,
+                    onLeave, age: ins.age, insuranceNotes: ins.notes,
+                });
+                okCount++;
+                const diff = netSalary - oldNet;
+                log.push(`✓ ${emp.name}: 差引 ${formatCurrency(oldNet)} → ${formatCurrency(netSalary)} (${diff >= 0 ? '+' : ''}${formatCurrency(diff)})`);
+            });
+
+            saveData('records');
+            if (typeof filterPayrollList === 'function') filterPayrollList();
+
+            let out = `✅ ${okCount} 件を再計算しました${skipCount > 0 ? `（スキップ ${skipCount} 件）` : ''}\n\n`;
+            out += log.slice(0, 20).join('\n');
+            if (log.length > 20) out += `\n…他 ${log.length - 20} 件`;
+            alert(out);
         }
 
         /**
