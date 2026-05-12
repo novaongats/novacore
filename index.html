@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.4 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.5 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14892,6 +14892,31 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         <!-- Tab: 給与一覧 -->
         <div id=&quot;tab-list&quot; class=&quot;tab-content hidden&quot;>
+            <div class=&quot;card no-print&quot; id=&quot;tax-advisor-fix-card&quot; style=&quot;background:#fffbeb;border:2px solid #f59e0b;&quot;>
+                <div class=&quot;card-header&quot; style=&quot;color:#78350f;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;&quot;>
+                    <span>📋 税理士の修正を一括適用（2026年4月分）</span>
+                    <button class=&quot;btn btn-secondary&quot; onclick=&quot;document.getElementById('tax-advisor-fix-card').style.display='none'&quot; style=&quot;margin:0;padding:6px 12px;font-size:12px;&quot;>✕ 非表示</button>
+                </div>
+                <div style=&quot;padding:0 4px;color:#78350f;&quot;>
+                    <div style=&quot;font-size:13px;line-height:1.7;&quot;>
+                        税理士から修正の指摘を受けた以下の内容を、1ボタンで全部反映します:
+                    </div>
+                    <ul style=&quot;margin:8px 20px;font-size:12px;line-height:1.7;&quot;>
+                        <li>都道府県を全員「東京都」に修正（健保料率 9.85% で再計算）</li>
+                        <li>鈴木亨・鈴木可子の標準報酬月額を ¥126,000 に設定</li>
+                        <li>従業員マスタの全員の社保額（健保/年金/介護/支援金）を最新料率で再計算</li>
+                        <li>2026年4月の全員の給与レコードを上書き再計算</li>
+                        <li>鈴木篤の所得税を ¥72,018（税理士指定値）に上書き</li>
+                        <li>五島未瑞希の所得税を ¥0（税理士指定値）に上書き</li>
+                    </ul>
+                    <div style=&quot;margin:10px 0;padding:8px;background:#fef3c7;border-radius:6px;font-size:12px;&quot;>
+                        ⚠️ 既存データを上書きするので、念のため事前に「給与一覧 → 一覧を印刷」で現在のスナップショットを保存することをお勧めします。
+                    </div>
+                    <div style=&quot;display:flex;gap:10px;margin:12px 0 4px;&quot;>
+                        <button class=&quot;btn&quot; onclick=&quot;applyTaxAdvisorFixes()&quot; style=&quot;background:#dc2626;color:white;font-weight:700;padding:12px 24px;&quot;>🛠 税理士の修正をすべて適用する</button>
+                    </div>
+                </div>
+            </div>
             <div class=&quot;card&quot;>
                 <div class=&quot;card-header&quot;>給与一覧</div>
                 <div class=&quot;search-bar&quot;>
@@ -18675,7 +18700,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.4
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.5
                     </div>
                 </div>
             `;
@@ -19111,12 +19136,17 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
                 const taxableForIncomeTax = Math.max(0,
                     grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
-                const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
+                // 所得税: 税理士から指示された手動上書き (incomeTaxOverride=true) があれば、それを尊重する
+                const incomeTax    = rec.incomeTaxOverride
+                    ? rec.incomeTax
+                    : calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
                 const residentTax  = emp.residentTax || 0;
                 const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
                 const netSalary    = grossSalary - totalDed;
 
                 const oldNet = rec.netSalary;
+                const preservedOverride = rec.incomeTaxOverride;
+                const preservedOverrideNote = rec.incomeTaxOverrideNote;
                 Object.assign(rec, {
                     empName: emp.name,
                     empType: emp.type,
@@ -19126,9 +19156,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     incomeTax, residentTax, totalDed, netSalary,
                     onLeave, age: ins.age, insuranceNotes: ins.notes,
                 });
+                if (preservedOverride) {
+                    rec.incomeTaxOverride = preservedOverride;
+                    rec.incomeTaxOverrideNote = preservedOverrideNote;
+                }
                 okCount++;
                 const diff = netSalary - oldNet;
-                log.push(`✓ ${emp.name}: 差引 ${formatCurrency(oldNet)} → ${formatCurrency(netSalary)} (${diff >= 0 ? '+' : ''}${formatCurrency(diff)})`);
+                const overrideMarker = preservedOverride ? ' (所得税:手動上書き保持)' : '';
+                log.push(`✓ ${emp.name}: 差引 ${formatCurrency(oldNet)} → ${formatCurrency(netSalary)} (${diff >= 0 ? '+' : ''}${formatCurrency(diff)})${overrideMarker}`);
             });
 
             saveData('records');
@@ -19138,6 +19173,179 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             out += log.slice(0, 20).join('\n');
             if (log.length > 20) out += `\n…他 ${log.length - 20} 件`;
             alert(out);
+        }
+
+        // ============================================================
+        // 税理士からの修正を一括適用 (2026-04 専用) — v2.6.5
+        // ============================================================
+        /**
+         * 税理士から指摘された修正を一発で全部反映する。
+         * 操作内容:
+         *   1. 該当全員の prefecture を 'tokyo' に修正
+         *   2. 鈴木亨・鈴木可子の standardRemuneration を 126000 に設定
+         *   3. 介護保険料率は v2.6.4 で 1.62% に修正済 (定数)
+         *   4. 全員の社保額を最新料率で再計算 (recalcAllInsuranceAmounts 相当)
+         *   5. 2026-04 の全員の給与レコードを上書き再計算
+         *   6. 鈴木篤の所得税を ¥72,018 (税理士指定) に上書き
+         *   7. 五島未瑞希の所得税を ¥0 (税理士指定) に上書き
+         */
+        function applyTaxAdvisorFixes() {
+            const TARGET_MONTH = '2026-04';
+            const msg = `税理士から指摘された修正を一括適用します。\n\n` +
+                `対象: 2026年4月\n\n` +
+                `①〜⑥の手順を順に実行します。途中で失敗してもアラートで通知します。\n\n` +
+                `続行しますか?`;
+            if (!confirm(msg)) return;
+
+            const findEmp = (name) => employees.find(e => e &amp;&amp; e.name &amp;&amp; e.name.trim() === name);
+            const log = [];
+
+            // ----- ① prefecture を全員 tokyo に -----
+            let prefFixed = 0;
+            employees.forEach(emp => {
+                if (emp &amp;&amp; emp.prefecture !== 'tokyo') {
+                    log.push(`✓ ${emp.name}: 都道府県 ${emp.prefecture || '(未設定)'} → tokyo`);
+                    emp.prefecture = 'tokyo';
+                    prefFixed++;
+                }
+            });
+
+            // ----- ② 標準報酬月額の修正 -----
+            const stdFixes = [
+                { name: '鈴木亨',   std: 126000 },
+                { name: '鈴木可子', std: 126000 },
+            ];
+            let stdFixed = 0;
+            stdFixes.forEach(({ name, std }) => {
+                const emp = findEmp(name);
+                if (emp) {
+                    log.push(`✓ ${name}: 標準報酬月額 ¥${(emp.standardRemuneration || 0).toLocaleString('ja-JP')} → ¥${std.toLocaleString('ja-JP')}`);
+                    emp.standardRemuneration = std;
+                    stdFixed++;
+                } else {
+                    log.push(`⚠ ${name}: 従業員マスタに見つかりません (スキップ)`);
+                }
+            });
+
+            // ----- ③ 全員の社保額を最新料率で再計算 -----
+            let insRecalcCount = 0;
+            employees.forEach(emp => {
+                if (!emp || !emp.healthCheck) return;
+                const std = emp.standardRemuneration || inferStandardRemuneration(emp);
+                if (!std) {
+                    log.push(`⚠ ${emp.name}: 標報未登録 (社保再計算スキップ)`);
+                    return;
+                }
+                emp.standardRemuneration = std;
+                const hr = getHealthRate(emp.prefecture || 'tokyo');
+                const pensionStd = Math.min(std, PENSION_MAX_STANDARD);
+                emp.healthAmount       = roundShakai(std * hr / 100 / 2);
+                emp.pensionAmount      = emp.pensionCheck ? roundShakai(pensionStd * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0;
+                emp.careAmount         = emp.careCheck    ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
+                emp.childSupportAmount = roundShakai(std * PAYROLL_CONSTANTS.childSupportRate / 100 / 2);
+                insRecalcCount++;
+            });
+            log.push(`✓ ${insRecalcCount}名の社保額を再計算 (健保 9.85% / 介護 1.62% / 支援金 0.23%)`);
+            saveData('employees');
+
+            // ----- ④ 2026-04 の給与レコードを上書き再計算 -----
+            const targets = payrollRecords.filter(r => r.month === TARGET_MONTH);
+            if (targets.length === 0) {
+                alert(`⚠ ${TARGET_MONTH} の給与レコードがありません。\n\nまず「役員を一括計算」「個別に計算実行」で給与レコードを作成してください。\n\n（マスタの修正だけは完了しました: prefecture ${prefFixed}件 / 標報 ${stdFixed}件 / 社保再計算 ${insRecalcCount}名）`);
+                updateAllTables();
+                return;
+            }
+            const rates = getCurrentRates(TARGET_MONTH);
+            let recRecalcCount = 0;
+            targets.forEach(rec => {
+                const emp = employees.find(e => e.id === rec.empId);
+                if (!emp) return;
+                const ins = getInsuranceStatusAtMonth(emp, TARGET_MONTH);
+                const onLeave = isOnLeave(emp);
+                const basePay    = rec.basePay || 0;
+                const commission = rec.commission || 0;
+                const allowance  = rec.allowance || 0;
+                const deduction  = rec.deduction || 0;
+
+                const commute = splitCommuteAllowance(
+                    emp.commuteAllowanceMonthly || 0,
+                    emp.commuteIsPublicTransport !== false);
+                const includeCommute = (emp.type !== 'executive') || ((emp.commuteAllowanceMonthly || 0) > 0);
+                const commuteTotal      = includeCommute ? commute.total : 0;
+                const commuteNonTaxable = includeCommute ? commute.nonTaxable : 0;
+                const commuteTaxable    = includeCommute ? commute.taxable : 0;
+                const grossSalary = basePay + commission + allowance + commuteTotal - deduction;
+
+                const health       = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+                const pension      = (!onLeave &amp;&amp; ins.pension)      ? (emp.pensionAmount || 0) : 0;
+                const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
+                const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
+                const employment   = (ins.employment &amp;&amp; emp.type !== 'executive')
+                    ? Math.floor(grossSalary * (rates ? rates.employmentEmployee : 0.6) / 100) : 0;
+                const taxableForIncomeTax = Math.max(0,
+                    grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
+                const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
+                const residentTax  = emp.residentTax || 0;
+                const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
+                const netSalary    = grossSalary - totalDed;
+
+                Object.assign(rec, {
+                    empName: emp.name,
+                    empType: emp.type,
+                    grossSalary, taxableGross: taxableForIncomeTax,
+                    commuteTotal, commuteNonTaxable, commuteTaxable,
+                    health, pension, care, childSupport, employment,
+                    incomeTax, residentTax, totalDed, netSalary,
+                    onLeave, age: ins.age, insuranceNotes: ins.notes,
+                });
+                recRecalcCount++;
+            });
+            log.push(`✓ ${recRecalcCount}件の給与レコードを最新ロジック (所得税は社保控除後) で再計算`);
+
+            // ----- ⑤ 鈴木篤の所得税を ¥72,018 に上書き (税理士指定) -----
+            const overrides = [
+                { name: '鈴木篤',       incomeTax: 72018, note: '税理士指定 (年税額月割り方式)' },
+                { name: '五島未瑞希',   incomeTax: 0,     note: '税理士指定' },
+            ];
+            overrides.forEach(({ name, incomeTax, note }) => {
+                const emp = findEmp(name);
+                if (!emp) {
+                    log.push(`⚠ ${name}: 従業員マスタに見つかりません (所得税上書きスキップ)`);
+                    return;
+                }
+                const rec = payrollRecords.find(r => r.month === TARGET_MONTH &amp;&amp; r.empId === emp.id);
+                if (!rec) {
+                    log.push(`⚠ ${name}: ${TARGET_MONTH} のレコードなし (所得税上書きスキップ)`);
+                    return;
+                }
+                const oldTax = rec.incomeTax || 0;
+                rec.incomeTax = incomeTax;
+                rec.incomeTaxOverride = true; // 自動再計算時に上書きを保持するためのフラグ
+                rec.incomeTaxOverrideNote = note;
+                rec.totalDed = (rec.health || 0) + (rec.pension || 0) + (rec.care || 0)
+                    + (rec.childSupport || 0) + (rec.employment || 0) + incomeTax + (rec.residentTax || 0);
+                rec.netSalary = (rec.grossSalary || 0) - rec.totalDed;
+                log.push(`✓ ${name}: 所得税 ¥${oldTax.toLocaleString('ja-JP')} → ¥${incomeTax.toLocaleString('ja-JP')} (${note})`);
+            });
+
+            // ----- ⑥ 保存 -----
+            saveData('records');
+            saveData('employees');
+            updateAllTables();
+            filterPayrollList();
+
+            // 完了アラート
+            const total2604 = payrollRecords
+                .filter(r => r.month === TARGET_MONTH)
+                .reduce((s, r) => s + (r.netSalary || 0), 0);
+            let out = `✅ 税理士の修正を全て適用しました\n\n`;
+            out += log.join('\n');
+            out += `\n\n振込額合計 (${TARGET_MONTH}): ¥${total2604.toLocaleString('ja-JP')}\n`;
+            out += `\n→ 給与一覧で数字を確認してください。\n→ 振込データ作成 ボタンで全銀協CSV を出力できます。`;
+            alert(out);
+
+            // 適用済みフラグを保存 (将来この処理を二重適用しないため)
+            try { localStorage.setItem('payroll_tax_advisor_fix_2026_04_applied', '1'); } catch {}
         }
 
         // ============================================================
