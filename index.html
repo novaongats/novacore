@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.3 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.4 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14645,11 +14645,20 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <div class=&quot;form-group&quot;>
                             <label class=&quot;form-label&quot;>勤務地の都道府県（健康保険料率）</label>
                             <select class=&quot;form-select&quot; id=&quot;emp-prefecture&quot;>
-                                <option value=&quot;tokyo&quot;>東京都 9.98%</option>
-                                <option value=&quot;kanagawa&quot;>神奈川県 10.02%</option>
-                                <option value=&quot;aichi&quot;>愛知県 10.01%</option>
-                                <option value=&quot;gifu&quot;>岐阜県 10.06%</option>
+                                <option value=&quot;tokyo&quot;>東京都 9.85%</option>
+                                <option value=&quot;kanagawa&quot;>神奈川県 9.92%</option>
+                                <option value=&quot;aichi&quot;>愛知県 9.93%</option>
+                                <option value=&quot;gifu&quot;>岐阜県 9.80%</option>
                             </select>
+                            <small style=&quot;color: #64748b;&quot;>※令和8年度 (FY2026) の協会けんぽ料率</small>
+                        </div>
+                        <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>標準報酬月額（円）</label>
+                            <input type=&quot;number&quot; class=&quot;form-input&quot; id=&quot;emp-std-remuneration&quot; value=&quot;0&quot;>
+                            <small style=&quot;color: #64748b;&quot;>※算定基礎届で決まる金額。日本年金機構の通知書に記載。例: ¥126,000、¥150,000、¥200,000 等。料率変更時の自動再計算の基準値になります</small>
+                            <div style=&quot;margin-top:4px;&quot;>
+                                <button type=&quot;button&quot; onclick=&quot;autoCalcInsuranceFromStd()&quot; style=&quot;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;&quot;>↻ 標報から健保・年金・介護・支援金を自動算出</button>
+                            </div>
                         </div>
                     </div>
                     <div class=&quot;form-grid&quot;>
@@ -14746,6 +14755,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <thead>
                             <tr>
                                 <th>ID</th><th>氏名</th><th class=&quot;no-print&quot;>フリガナ</th><th class=&quot;no-print&quot;>メール</th><th>雇用形態</th><th>給与</th><th>扶養</th>
+                                <th title=&quot;勤務地の都道府県。料率違いに注意&quot;>地</th>
+                                <th title=&quot;標準報酬月額。算定基礎届で決まる金額&quot;>標報</th>
                                 <th>健保</th><th>年金</th><th>介護</th><th>雇用</th><th>住民税</th><th class=&quot;no-print&quot;>操作</th>
                             </tr>
                         </thead>
@@ -16450,10 +16461,11 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         const PAYROLL_CONSTANTS = {
             // 2026年度 (令和8年度) 料率
+            // 出典: 協会けんぽ 令和8年度 保険料額表 (3月分・4月納付分から適用)
             pensionRate:          18.3,    // %
-            careRate:             1.82,    // %
-            childSupportRate:     0.23,    // %
-            defaultHealthRate:    9.98,    // % (都道府県マスタ未設定時のフォールバック)
+            careRate:             1.62,    // % ← v2.6.4 で 1.82 から修正 (協会けんぽ FY2026 正式値)
+            childSupportRate:     0.23,    // % (労使合計。本人折半 0.115%)
+            defaultHealthRate:    9.85,    // % (都道府県マスタ未設定時のフォールバック / 東京を既定)
 
             // 賞与の上限
             bonusPensionPerTimeCap:  1500000,   // 年金: 150万円/回
@@ -16888,6 +16900,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 pensionCheck: document.getElementById('emp-pension-check').checked,
                 careCheck: document.getElementById('emp-care-check').checked,
                 employmentCheck: document.getElementById('emp-employment-check').checked,
+                standardRemuneration: parseInt(document.getElementById('emp-std-remuneration')?.value) || 0,
                 healthAmount: parseInt(document.getElementById('emp-health-amount').value) || 0,
                 pensionAmount: parseInt(document.getElementById('emp-pension-amount').value) || 0,
                 careAmount: parseInt(document.getElementById('emp-care-amount').value) || 0,
@@ -16955,9 +16968,16 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 var emailDisp = emp.email
                     ? '<span style=&quot;color:#1f2937&quot; title=&quot;'+emp.email+'&quot;>'+emp.email+'</span>'
                     : '<span style=&quot;color:#cbd5e0&quot;>未登録</span>';
+                const prefLabel = { tokyo: '東', kanagawa: '神', aichi: '愛', gifu: '岐' }[emp.prefecture || 'tokyo'] || '?';
+                const prefRate = (typeof getHealthRate === 'function') ? getHealthRate(emp.prefecture || 'tokyo') : 0;
+                const stdDisp = emp.standardRemuneration
+                    ? `<span title=&quot;標準報酬月額&quot;>${formatCurrency(emp.standardRemuneration)}</span>`
+                    : '<span style=&quot;color:#dc2626;font-size:10px;&quot; title=&quot;標準報酬月額未登録。算定基礎届で決定し、ここに入力してください&quot;>未登録 ⚠</span>';
                 row.innerHTML = `
                     <td>${emp.id}</td><td>${emp.name}</td><td class=&quot;no-print&quot; style=&quot;font-size:11px;color:#64748b&quot;>${emp.nameKana || ''}</td><td class=&quot;no-print&quot; style=&quot;font-size:11px&quot;>${emailDisp}</td><td>${typeBadge}</td><td class=&quot;text-right&quot;>${salaryDisp}</td>
                     <td class=&quot;text-center&quot;>${emp.dependents}人</td>
+                    <td class=&quot;text-center&quot; title=&quot;${emp.prefecture || 'tokyo'} (健保料率 ${prefRate}%)&quot;>${prefLabel}</td>
+                    <td class=&quot;text-right&quot; style=&quot;font-size:11px;&quot;>${stdDisp}</td>
                     <td class=&quot;text-center&quot;>${emp.healthCheck ? '○' : '×'}</td>
                     <td class=&quot;text-center&quot;>${emp.pensionCheck ? '○' : '×'}</td>
                     <td class=&quot;text-center&quot;>${emp.careCheck ? '○' : '×'}</td>
@@ -17008,6 +17028,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('emp-type').value = emp.type;
             document.getElementById('emp-dependents').value = emp.dependents;
             document.getElementById('emp-prefecture').value = emp.prefecture || 'tokyo';
+            const stdEl = document.getElementById('emp-std-remuneration'); if (stdEl) stdEl.value = emp.standardRemuneration || 0;
             document.getElementById('emp-health-amount').value = emp.healthAmount;
             document.getElementById('emp-pension-amount').value = emp.pensionAmount;
             document.getElementById('emp-care-amount').value = emp.careAmount;
@@ -18654,7 +18675,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.3
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.4
                     </div>
                 </div>
             `;
@@ -19660,6 +19681,42 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             // 法令準拠の端数処理。Math.floor からの差は最大 1 円。
             const childSupport = roundShakai(healthAmt * PAYROLL_CONSTANTS.childSupportRate / hr);
             document.getElementById('emp-child-amount').value = childSupport;
+        }
+
+        /**
+         * 標準報酬月額から、健保・年金・介護・支援金を自動算出してフォームに入れる。
+         * 都道府県は同じ画面の prefecture セレクタを参照。
+         * 介護は careCheck が ON のときのみ加算（チェック未確定でも一旦計算は実施し、保存時に判定）。
+         */
+        function autoCalcInsuranceFromStd() {
+            const std = parseInt(document.getElementById('emp-std-remuneration').value) || 0;
+            const pref = document.getElementById('emp-prefecture').value || 'tokyo';
+            if (std <= 0) {
+                alert('先に「標準報酬月額」を入力してください。\\n（日本年金機構の通知書を参照、または算定基礎届タブで決定）');
+                return;
+            }
+            const hr = getHealthRate(pref);
+            const pensionStd = Math.min(std, PENSION_MAX_STANDARD);
+            const careCheck = document.getElementById('emp-care-check').checked;
+            const pensionCheck = document.getElementById('emp-pension-check').checked;
+
+            const health       = roundShakai(std * hr / 100 / 2);
+            const pension      = pensionCheck ? roundShakai(pensionStd * PAYROLL_CONSTANTS.pensionRate / 100 / 2) : 0;
+            const care         = careCheck    ? roundShakai(std * PAYROLL_CONSTANTS.careRate / 100 / 2) : 0;
+            const childSupport = roundShakai(std * PAYROLL_CONSTANTS.childSupportRate / 100 / 2);
+
+            document.getElementById('emp-health-amount').value = health;
+            document.getElementById('emp-pension-amount').value = pension;
+            document.getElementById('emp-care-amount').value = care;
+            document.getElementById('emp-child-amount').value = childSupport;
+
+            const prefLabel = { tokyo: '東京', kanagawa: '神奈川', aichi: '愛知', gifu: '岐阜' }[pref] || pref;
+            alert(`✅ 標準報酬月額 ¥${std.toLocaleString('ja-JP')} (${prefLabel} 健保 ${hr}%) で再計算しました\n\n` +
+                `健保 ¥${health.toLocaleString('ja-JP')}\n` +
+                `年金 ¥${pension.toLocaleString('ja-JP')}\n` +
+                `介護 ¥${care.toLocaleString('ja-JP')}${careCheck ? '' : ' (介護未加入のため¥0)'}\n` +
+                `支援金 ¥${childSupport.toLocaleString('ja-JP')}\n\n` +
+                `※「登録」ボタンを押して保存してください`);
         }
 
         /**
