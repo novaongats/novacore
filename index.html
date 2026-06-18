@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.8 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.9 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -14930,6 +14930,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     <input type=&quot;month&quot; class=&quot;search-input&quot; id=&quot;list-month&quot;>
                     <button class=&quot;btn btn-primary&quot; onclick=&quot;filterPayrollList()&quot;>表示</button>
                     <button class=&quot;btn&quot; onclick=&quot;diagnosePayrollIntegrity()&quot; style=&quot;background:#0ea5e9;color:white;&quot; title=&quot;対象月の全レコードと従業員マスタを総点検し、各項目を「正規値」と比較。ズレを赤字表示し、自動修正できます&quot;>🔍 数値検証（診断）</button>
+                    <button class=&quot;btn&quot; onclick=&quot;createNextMonthFromPrevious()&quot; style=&quot;background:#8b5cf6;color:white;&quot; title=&quot;表示中の月の給与レコードを、翌月分として「同額（手動上書きも含めて全て）」でコピー作成します&quot;>📋 翌月分を同額でコピー作成</button>
                     <button class=&quot;btn&quot; onclick=&quot;recalcAllPayrollForMonth()&quot; style=&quot;background:#f59e0b;color:white;&quot; title=&quot;選択中の対象月の全員の給与レコードを、現行の従業員マスタ値（社保額・住民税など）と最新ロジックで再計算します&quot;>♻ 対象月の給与を全員再計算</button>
                     <button class=&quot;btn btn-success&quot; onclick=&quot;showBulkPrintModal()&quot;>給与明細を一括印刷</button>
                     <button class=&quot;btn btn-secondary&quot; onclick=&quot;printPayrollList()&quot;>一覧を印刷</button>
@@ -18779,7 +18780,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.8
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.9
                     </div>
                 </div>
             `;
@@ -19256,6 +19257,82 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             out += log.slice(0, 20).join('\n');
             if (log.length > 20) out += `\n…他 ${log.length - 20} 件`;
             alert(out);
+        }
+
+        // ============================================================
+        // 翌月分を同額でコピー作成 — v2.6.9
+        // ============================================================
+        /**
+         * 表示中の月（コピー元）の給与レコードを、翌月分として同額で複製する。
+         * - 手動上書き (incomeTaxOverride / healthOverride) もそのまま引き継ぐ
+         * - 既存の翌月レコードがある場合は確認ダイアログで上書き可
+         * - 給与明細表示・一括印刷・メール送信・振込データ作成も
+         *   payrollRecords を直接参照しているので、翌月レコード作成後すぐ反映される
+         */
+        function createNextMonthFromPrevious() {
+            const sourceMonth = document.getElementById('list-month').value;
+            if (!sourceMonth) {
+                alert('対象年月を選択してください（コピー元の月）');
+                return;
+            }
+
+            // 翌月計算
+            const [yStr, mStr] = sourceMonth.split('-');
+            const y = parseInt(yStr); const m = parseInt(mStr);
+            const targetMonth = m < 12
+                ? `${y}-${String(m + 1).padStart(2, '0')}`
+                : `${y + 1}-01`;
+
+            const sourceRecords = payrollRecords.filter(r => r.month === sourceMonth);
+            if (sourceRecords.length === 0) {
+                alert(`コピー元 ${sourceMonth} の給与レコードがありません`);
+                return;
+            }
+
+            const existingTargetRecords = payrollRecords.filter(r => r.month === targetMonth);
+            let proceed;
+            if (existingTargetRecords.length > 0) {
+                proceed = confirm(
+                    `${targetMonth} に既存の給与レコードが ${existingTargetRecords.length} 件あります。\n\n` +
+                    `[OK] 既存を全削除して、${sourceMonth} の内容で作り直す\n` +
+                    `[キャンセル] 中止\n\n` +
+                    `※ ${targetMonth} の既存レコードは完全に上書きされます`);
+            } else {
+                const totalNet = sourceRecords.reduce((s, r) => s + (r.netSalary || 0), 0);
+                proceed = confirm(
+                    `${sourceMonth} の給与レコード ${sourceRecords.length} 件を、\n` +
+                    `${targetMonth} の新規レコードとして「全員同額」でコピー作成します。\n\n` +
+                    `振込額合計（予定）: ¥${totalNet.toLocaleString('ja-JP')}\n\n` +
+                    `※ 手動上書きした所得税・健保額・住民税もそのままコピーされます\n\n` +
+                    `続行しますか?`);
+            }
+            if (!proceed) return;
+
+            // 既存の翌月レコードを削除
+            if (existingTargetRecords.length > 0) {
+                payrollRecords = payrollRecords.filter(r => r.month !== targetMonth);
+            }
+
+            // コピー元の全フィールドを引き継ぎつつ、月だけ書き換え
+            const newRecords = sourceRecords.map(rec => ({
+                ...rec,
+                month: targetMonth,
+            }));
+            payrollRecords.push(...newRecords);
+            saveData('records');
+
+            // 表示月を翌月に切り替えて再描画
+            document.getElementById('list-month').value = targetMonth;
+            filterPayrollList();
+
+            const totalNet = newRecords.reduce((s, r) => s + (r.netSalary || 0), 0);
+            const overrideCount = newRecords.filter(r => r.incomeTaxOverride || r.healthOverride).length;
+            alert(`✅ ${targetMonth} の給与レコード ${newRecords.length} 件を作成しました\n\n` +
+                  `振込額合計: ¥${totalNet.toLocaleString('ja-JP')}\n` +
+                  (overrideCount > 0 ? `手動上書きの保持: ${overrideCount}件\n` : '') +
+                  `\n→ 給与一覧で確認できます\n` +
+                  `→ 「明細」ボタンで各従業員の給与明細を表示\n` +
+                  `→ 「給与明細を一括印刷」/「振込データ作成」も使えます`);
         }
 
         // ============================================================
