@@ -13904,7 +13904,7 @@ function nvInvoicePrint(){
 <head>
     <meta charset=&quot;UTF-8&quot;>
     <meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;>
-    <title>給与計算システム v2.6.9 - PayCalc Pro</title>
+    <title>給与計算システム v2.6.10 - PayCalc Pro</title>
     <style>
     :root {
     --primary: #6366f1; --primary-dark: #5558e6; --secondary: #64748b;
@@ -16567,13 +16567,15 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         /**
          * 社会保険料の本人負担額の端数処理。
-         * 日本の法令: 50銭以下切り捨て、50銭超切り上げ（1円単位）。
+         * 法令の原則は「50銭以下切り捨て、50銭超切り上げ」だが、
+         * 労使の取り決めにより切り捨て運用も認められており、
+         * 顧問税理士（中西会計）の計算実務は一貫して「切り捨て」のため合わせる。
+         * (例: 支援金 144.9 → 144、健保 6,255.9 → 6,255 ← 令和8年度料額表の折半額)
          * @param {number} rawAmount 円未満を含む生計算結果
-         * @returns {number} 1円単位の本人負担額
+         * @returns {number} 1円単位の本人負担額（切り捨て）
          */
         function roundShakai(rawAmount) {
-            const yen = Math.floor(rawAmount);
-            return (rawAmount - yen) > 0.5 ? yen + 1 : yen;
+            return Math.floor(rawAmount);
         }
 
         /**
@@ -18780,7 +18782,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
                     <div style=&quot;margin-top:14px;font-size:10px;color:#444;border-top:1px solid #000;padding-top:8px;&quot;>
                         本台帳は労働基準法施行規則第54条に基づいて作成されています。<br>
-                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.9
+                        発行日: ${new Date().toLocaleDateString('ja-JP')} ／ 作成システム: NOVA Core 給与計算 v2.6.10
                     </div>
                 </div>
             `;
