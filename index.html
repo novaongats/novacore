@@ -25004,6 +25004,13 @@ var novaSync = {
     try {
       this.db = firebase.database();
       var self = this;
+      // 起動時点のFIREBASE_WINSキーのスナップショット。
+      // pull完了前のpushが「起動時のエコー（未変更の書き戻し）」か
+      // 「本物のローカル編集」かを区別するために使う。
+      this._bootSnapshot = {};
+      this.FIREBASE_WINS_KEYS.forEach(function(k){
+        self._bootSnapshot[k] = localStorage.getItem(k);
+      });
       this.db.ref('.info/connected').on('value', function(snap){
         if(snap.val()===true){
           console.log('[NovaSync] Connected');
@@ -25037,11 +25044,19 @@ var novaSync = {
     if(this.syncing[lsKey]) return;
     var fbKey = this.KEYS[lsKey];
     if(!fbKey) return;
-    // Firebase優先キーはpullComplete前のpushを保留（レースコンディション防止）
-    // ※旧実装は保留せず「破棄」していたため、pull完了前の編集が次回リロードで
-    //   Firebaseの古いデータに巻き戻されるバグがあった（給与データ消失の原因）。
-    //   _pendingPush に積んでおき、pull完了後の _flushPending で送信する。
+    // Firebase優先キーの pull完了前 push の扱い:
+    //  A) 起動時スナップショットと同一 = iframe初期化時のエコー（未変更の書き戻し）
+    //     → 破棄する。ここで保留するとローカルの古いデータがFirebaseの新しいデータを
+    //       上書きしてしまう（Firebase優先の設計が逆転する）ため。
+    //  B) スナップショットから変化あり = 本物のローカル編集（オフライン編集含む）
+    //     → _pendingPush に保留し、pull完了後の _flushPending で送信。
+    //       ※旧実装は無条件破棄だったため、pull前の編集が消失するバグがあった。
     if(this.FIREBASE_WINS_KEYS.indexOf(lsKey) !== -1 && !this._pullComplete){
+      var snap = this._bootSnapshot ? this._bootSnapshot[lsKey] : null;
+      if(snap === localStorage.getItem(lsKey)){
+        console.log('[NovaSync] Boot-echo push ignored for: '+lsKey);
+        return;
+      }
       this._pendingPush[lsKey]=true;
       console.log('[NovaSync] Push queued until pull complete for: '+lsKey);
       return;
