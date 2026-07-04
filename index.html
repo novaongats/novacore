@@ -2767,6 +2767,11 @@ tr.dept-row{background:var(--nc-primary-bg)!important}
     <!-- ===== 本部送信（月末締め処理） ===== -->
     <section id=&quot;page-honbu&quot; class=&quot;page-section&quot;>
       <h2>📤 本部送信（月末締め処理）</h2>
+      <div style=&quot;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0&quot;>
+        <label style=&quot;font-size:13px;font-weight:600&quot;>送信する対象月:</label>
+        <input type=&quot;month&quot; id=&quot;honbu-month-input&quot; onchange=&quot;refreshHonbuPage()&quot; style=&quot;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px&quot;>
+        <span style=&quot;font-size:11px;color:#94a3b8&quot;>※月初は前月が自動選択されます。別の月を送る場合はここで変更</span>
+      </div>
       <div class=&quot;sub&quot; id=&quot;honbu-month-label&quot;></div>
 
       <div style=&quot;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:16px 0;display:flex;align-items:flex-start;gap:12px&quot;>
@@ -3429,7 +3434,9 @@ function parseCSV(text){
     return result;
   });
 }
-function cleanVal(v){return v?v.replace(/&quot;/g,'').trim():''}
+// 引用符・桁区切りカンマ（半角/全角）・通貨記号を除去。
+// ※旧実装はカンマ未除去で parseInt('12,345')→12 になり売上が3桁単位で欠損していた
+function cleanVal(v){return v?v.replace(/&quot;/g,'').replace(/[,，¥￥]/g,'').trim():''}
 
 function normalizeDate(raw){
   const d=raw.replace(/[\/\-]/g,'').trim();
@@ -7267,8 +7274,17 @@ function saveHonbuStatus(st){
 }
 
 function getHonbuMonthKey(){
+  // 対象月セレクタの値を優先（旧実装は「今日の月」固定で、
+  // 月初に前月分を締めて送信すると翌月として誤送信される欠陥があった）
+  const input=document.getElementById('honbu-month-input');
+  if(input &amp;&amp; input.value) return input.value;
+  // デフォルト: 月初10日までは「前月」（月末締め処理は前月分を送るのが通常のため）
   const now=new Date();
-  return now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  let y=now.getFullYear(), m=now.getMonth()+1;
+  if(now.getDate()<=10){ m--; if(m<1){m=12;y--;} }
+  const mk=y+'-'+String(m).padStart(2,'0');
+  if(input) input.value=mk;
+  return mk;
 }
 
 function refreshHonbuPage(){
@@ -10290,65 +10306,10 @@ input,select{background:var(--nc-card)!important;color:var(--nc-text)!important;
     <script>
         const APP_VERSION = '1.0.0';
         const STORAGE_KEY = 'expense-tracker-data-v2';
-        const initialData = [
-            { id: 1, date: '2024-12-24', vendor: 'とんかつ とし峰', category: '飲食代', amount: 12150, reducedTax: false, hasInvoice: true },
-            { id: 2, date: '2024-12-28', vendor: '陣', category: '飲食代', amount: 19650, reducedTax: false, hasInvoice: false },
-            { id: 3, date: '2024-12-29', vendor: '穂', category: '飲食代', amount: 12000, reducedTax: false, hasInvoice: false },
-            { id: 4, date: '2025-01-01', vendor: '陣', category: '飲食代', amount: 5300, reducedTax: false, hasInvoice: false },
-            { id: 5, date: '2025-01-01', vendor: 'バーガーキング', category: '飲食代', amount: 12260, reducedTax: false, hasInvoice: true },
-            { id: 6, date: '2025-01-03', vendor: 'ガスト', category: '飲食代', amount: 4233, reducedTax: false, hasInvoice: false },
-            { id: 7, date: '2025-01-05', vendor: 'スギ薬局', category: '食材費', amount: 530, reducedTax: true, hasInvoice: true },
-            { id: 8, date: '2025-01-05', vendor: '業務スーパー', category: '食材費', amount: 1086, reducedTax: true, hasInvoice: false },
-            { id: 9, date: '2025-01-06', vendor: 'Amazon', category: '食材費', amount: 1980, reducedTax: true, hasInvoice: false },
-            { id: 10, date: '2025-01-06', vendor: '業務スーパー', category: '食材費', amount: 6937, reducedTax: true, hasInvoice: false },
-            { id: 11, date: '2025-01-07', vendor: '喜楽本店', category: '消耗品費', amount: 10000, reducedTax: false, hasInvoice: true },
-            { id: 12, date: '2025-01-07', vendor: 'ひこよし', category: '飲食代', amount: 6500, reducedTax: false, hasInvoice: false },
-            { id: 13, date: '2025-01-09', vendor: 'スズキプランタン', category: '贈答品', amount: 5346, reducedTax: true, hasInvoice: false },
-            { id: 14, date: '2025-01-09', vendor: 'フジヤマ55', category: '飲食代', amount: 2090, reducedTax: false, hasInvoice: false },
-            { id: 15, date: '2025-01-09', vendor: '武蔵丸', category: '飲食代', amount: 5973, reducedTax: false, hasInvoice: false },
-            { id: 16, date: '2025-01-10', vendor: 'Amazon', category: '消耗品費', amount: 5340, reducedTax: false, hasInvoice: false },
-            { id: 17, date: '2025-01-10', vendor: 'エディオン', category: '事務用品費', amount: 21800, reducedTax: false, hasInvoice: false },
-            { id: 18, date: '2025-01-10', vendor: '陣', category: '飲食代', amount: 17800, reducedTax: false, hasInvoice: false },
-            { id: 19, date: '2025-01-10', vendor: '松屋フーズ', category: '飲食代', amount: 2300, reducedTax: false, hasInvoice: false },
-            { id: 20, date: '2025-01-10', vendor: 'エディオン', category: '事務備品費', amount: 254800, reducedTax: false, hasInvoice: false },
-            { id: 21, date: '2025-01-11', vendor: 'キッチン千賀', category: '飲食代', amount: 5500, reducedTax: false, hasInvoice: true },
-            { id: 22, date: '2025-01-13', vendor: '麺屋しずる', category: '飲食代', amount: 1110, reducedTax: false, hasInvoice: false },
-            { id: 23, date: '2025-01-13', vendor: 'ココ壱番屋', category: '飲食代', amount: 2490, reducedTax: false, hasInvoice: false },
-            { id: 24, date: '2025-01-14', vendor: '丸亀製麺', category: '飲食代', amount: 4760, reducedTax: false, hasInvoice: true },
-            { id: 25, date: '2025-01-15', vendor: 'すぎ薬局', category: '消耗品費', amount: 1942, reducedTax: false, hasInvoice: false },
-            { id: 26, date: '2025-01-15', vendor: 'スギ薬局', category: '消耗品費', amount: 2662, reducedTax: true, hasInvoice: false },
-            { id: 27, date: '2025-01-16', vendor: 'タワーズ駐車場', category: '交通費', amount: 350, reducedTax: false, hasInvoice: true },
-            { id: 28, date: '2025-01-16', vendor: '松坂屋百貨店', category: '贈答品', amount: 72600, reducedTax: false, hasInvoice: false },
-            { id: 29, date: '2025-01-16', vendor: '松坂屋百貨店', category: '贈答品', amount: 1125344, reducedTax: false, hasInvoice: false },
-            { id: 30, date: '2025-01-17', vendor: '武蔵丸', category: '飲食代', amount: 27929, reducedTax: false, hasInvoice: true },
-            { id: 31, date: '2025-01-17', vendor: '三階松', category: '飲食代', amount: 74175, reducedTax: false, hasInvoice: true },
-            { id: 32, date: '2025-01-18', vendor: 'ぺぽーと', category: '飲食代', amount: 8500, reducedTax: false, hasInvoice: true },
-            { id: 33, date: '2025-01-18', vendor: 'Jセルフ平田SS', category: '車両費', amount: 2800, reducedTax: false, hasInvoice: false },
-            { id: 34, date: '2025-01-19', vendor: 'Bar Steelo', category: '飲食代', amount: 10600, reducedTax: false, hasInvoice: false },
-            { id: 35, date: '2025-01-19', vendor: 'BOSSA', category: '飲食代', amount: 21530, reducedTax: false, hasInvoice: false },
-            { id: 36, date: '2025-01-19', vendor: '蒲郡拾石食堂', category: '飲食代', amount: 1960, reducedTax: false, hasInvoice: false },
-            { id: 37, date: '2025-01-19', vendor: 'ハートランド株式会社', category: '消耗品費', amount: 14250, reducedTax: false, hasInvoice: false },
-            { id: 38, date: '2025-01-19', vendor: 'ShenZhenShiDeNuoXiDianZiKeJiYouXianGongSi', category: '消耗品費', amount: 2296, reducedTax: false, hasInvoice: false },
-            { id: 39, date: '2025-01-19', vendor: '業務スーパー', category: '食材費', amount: 2170, reducedTax: true, hasInvoice: false },
-            { id: 40, date: '2025-01-20', vendor: '愛知県西尾保健所', category: '租税公課', amount: 18000, reducedTax: false, hasInvoice: false },
-            { id: 41, date: '2025-01-20', vendor: 'サンヨネ', category: '食材費', amount: 747, reducedTax: true, hasInvoice: false },
-            { id: 42, date: '2025-01-20', vendor: 'ＲＡＭ', category: '飲食代', amount: 950, reducedTax: false, hasInvoice: false },
-            { id: 43, date: '2025-01-20', vendor: '来来亭', category: '飲食代', amount: 3000, reducedTax: false, hasInvoice: false },
-            { id: 44, date: '2025-01-21', vendor: 'アミカ豊川店', category: '食材費', amount: 8210, reducedTax: true, hasInvoice: true },
-            { id: 45, date: '2025-01-22', vendor: '宮城 陵', category: '福利厚生費', amount: 10000, reducedTax: false, hasInvoice: false },
-            { id: 46, date: '2025-01-22', vendor: 'あいやホールディングス', category: '飲食代', amount: 3430, reducedTax: false, hasInvoice: false },
-            { id: 47, date: '2025-01-23', vendor: 'エディオン', category: '消耗品費', amount: 1769, reducedTax: false, hasInvoice: false },
-            { id: 48, date: '2025-01-22', vendor: 'アピタ', category: '食材費', amount: 3790, reducedTax: true, hasInvoice: false },
-            { id: 49, date: '2025-01-23', vendor: '蒲郡拾石食堂', category: '飲食代', amount: 2070, reducedTax: false, hasInvoice: false },
-            { id: 50, date: '2025-01-24', vendor: 'うえむら', category: '飲食代', amount: 10340, reducedTax: false, hasInvoice: false },
-            { id: 51, date: '2025-01-24', vendor: 'ミスタードーナツ', category: '飲食代', amount: 4898, reducedTax: false, hasInvoice: false },
-            { id: 52, date: '2025-01-25', vendor: '浜名湖レークサイドプラザ', category: '宿泊費', amount: 73420, reducedTax: false, hasInvoice: false },
-            { id: 53, date: '2025-01-27', vendor: '丸亀製麺', category: '飲食代', amount: 3570, reducedTax: false, hasInvoice: false },
-            { id: 54, date: '2025-01-28', vendor: '業務スーパー', category: '消耗品費', amount: 4762, reducedTax: false, hasInvoice: false },
-            { id: 55, date: '2025-01-29', vendor: 'パルファン', category: '贈答品', amount: 96690, reducedTax: false, hasInvoice: false },
-            { id: 56, date: '2025-01-29', vendor: 'パルファン', category: '贈答品', amount: 67650, reducedTax: false, hasInvoice: false },
-            { id: 57, date: '2025-01-29', vendor: '磯のがってん寿司', category: '飲食代', amount: 4994, reducedTax: false, hasInvoice: false },
-        ];
+        // ※旧実装は2024-12〜2025-01の実データ57件をここにハードコードしていた。
+        //   新端末でlocalStorageが空だと毎回この57件が再注入され、Firebaseマージ経由で
+        //   全端末の経費集計を汚染するバグの原因だったため空配列化（実データはFirebase側に保存済み）。
+        const initialData = [];
         const categoryColors = {
             '飲食代': { bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300' },
             '食材費': { bg: 'bg-khaki-100', text: 'text-khaki-800', border: 'border-khaki-300' },
@@ -11212,7 +11173,35 @@ function saveCost(){var ym=document.getElementById('cMonth').value;var catId=doc
 function syncToParent(ym,cats,monthDaily){var entries=[];cats.forEach(function(cat){var sales=monthDaily.filter(function(d){return d.catId===cat.id}).reduce(function(s,d){return s+d.amount},0);if(sales>0)entries.push({yearMonth:ym,item:cat.name,dept:cat.dept,amount:sales,staff:getStaff(cat.staffId).name,note:cat.group});});try{parent.postMessage({type:'tracker-to-sales',yearMonth:ym,entries:entries},'*')}catch(e){}}
 
 // Boat race data
-window.addEventListener('message',function(e){if(!e.data)return;if(e.data.type==='boat-data-received'){var entries=e.data.entries||[];var ym=e.data.yearMonth;if(!entries.length)return;var daily=getDaily();var added=0;entries.forEach(function(entry){var dateStr=ym+'-15';var catId='boat_zero';if(entry.item&amp;&amp;entry.item.indexOf('せっちゃん')>=0)catId='boat_sec';var dup=daily.find(function(d){return d.catId===catId&amp;&amp;d.date===dateStr&amp;&amp;d.amount===entry.amount});if(!dup){daily.push({id:'ds_'+Date.now()+'_'+added,date:dateStr,catId:catId,amount:entry.amount,note:entry.item||'競艇',created:new Date().toISOString()});added++;}});if(added>0){saveDaily(daily);render()}}});
+window.addEventListener('message',function(e){
+  if(!e.data)return;
+  if(e.data.type==='boat-data-received'){
+    var entries=e.data.entries||[];var ym=e.data.yearMonth;if(!entries.length)return;
+    // カテゴリ未作成の環境では自動作成（無いと売上が無警告で消えるため）
+    var cats=getCats();var catsChanged=false;
+    if(!cats.find(function(c){return c.id==='boat_zero'})){cats.push({id:'boat_zero',name:'競艇ゼロスタ',dept:'boat',group:'競艇事業',staffId:'shiga',inputType:'project',revShare:{enabled:false,companyPct:100}});catsChanged=true;}
+    if(!cats.find(function(c){return c.id==='boat_sec'})){cats.push({id:'boat_sec',name:'競艇せっちゃん',dept:'boat',group:'競艇事業',staffId:'shiga',inputType:'project',revShare:{enabled:false,companyPct:100}});catsChanged=true;}
+    if(catsChanged)saveCats(cats);
+    var daily=getDaily();var changed=0;
+    entries.forEach(function(entry){
+      var dateStr=ym+'-15';
+      // 振分け: 競艇B(しょうへい)→boat_sec、それ以外→boat_zero
+      // ※旧実装は「せっちゃん」を含むかで判定していたが、送信側のitem名は
+      //   「競艇B(しょうへい)」のため一度もマッチせず、B分がA枠に誤計上されていた
+      var catId='boat_zero';
+      if(entry.item&amp;&amp;(entry.item.indexOf('競艇B')>=0||entry.item.indexOf('しょうへい')>=0||entry.item.indexOf('せっちゃん')>=0))catId='boat_sec';
+      // 同月・同カテゴリの既存レコードは「置換」（金額修正→再送時の二重計上防止）
+      var existing=daily.find(function(d){return !d._deleted&amp;&amp;d.catId===catId&amp;&amp;d.date===dateStr});
+      if(existing){
+        if(existing.amount!==entry.amount){existing.amount=entry.amount;existing.note=entry.item||'競艇';changed++;}
+      }else{
+        daily.push({id:'ds_'+Date.now()+'_'+Math.random().toString(36).substr(2,4),date:dateStr,catId:catId,amount:entry.amount,note:entry.item||'競艇',created:new Date().toISOString()});
+        changed++;
+      }
+    });
+    if(changed>0){saveDaily(daily);render()}
+  }
+});
 
 // Init migration
 (function(){
@@ -21331,8 +21320,14 @@ var salesMonth = (function(){ var d=new Date(); return d.getFullYear()+'-'+Strin
 var salesFilter = 'all';
 var salesViewMode = 'dept';
 
-function salesLoadAll(){
+// Raw版: tombstone(_deleted)を含む全レコード。書き込み系はこちらを使う
+// （物理削除するとFirebaseマージで削除済レコードが復活するため、_deleted方式で管理）
+function salesLoadAllRaw(){
   try{ return JSON.parse(localStorage.getItem('nova_sales')||'[]'); }catch(e){ return []; }
+}
+// 読み取り系: 削除済みを除外した表示用レコード
+function salesLoadAll(){
+  return salesLoadAllRaw().filter(function(r){ return !r._deleted; });
 }
 function salesSaveAll(arr){
   try{localStorage.setItem('nova_sales', JSON.stringify(arr));}catch(e){console.error('salesSaveAll error:',e);}
@@ -21361,20 +21356,20 @@ function salesResetMonth(){
   var mk=salesMonth;
   var parts=mk.split('-');
   var label=parts[0]+'年'+parseInt(parts[1])+'月';
-  var all=salesLoadAll();
-  var monthRecs=all.filter(function(r){ return r.date && r.date.substring(0,7)===mk; });
+  var all=salesLoadAllRaw();
+  var monthRecs=all.filter(function(r){ return !r._deleted && r.date && r.date.substring(0,7)===mk; });
   if(monthRecs.length===0){
     alert(label+'の売上データはありません。');
     return;
   }
   if(!confirm(label+'の売上データ（'+monthRecs.length+'件）をすべて削除しますか？\n\n※ この操作は元に戻せません。\n※ Firebase上のデータも削除されます。'))return;
-  // Filter out the month's records
-  var remaining=all.filter(function(r){ return !r.date || r.date.substring(0,7)!==mk; });
+  // tombstone化（他端末が旧レコードをpushしても復活しないよう _deleted で残す）
+  monthRecs.forEach(function(r){ r._deleted=Date.now(); });
   // Write directly to localStorage (bypass merge)
-  try{ localStorage.setItem('nova_sales', JSON.stringify(remaining)); }catch(e){}
+  try{ localStorage.setItem('nova_sales', JSON.stringify(all)); }catch(e){}
   // Write directly to Firebase (bypass merge)
   if(typeof novaSync!=='undefined' && novaSync.db && novaSync.ready){
-    novaSync.db.ref('novacore/nova_sales').set(JSON.stringify(remaining)).then(function(){
+    novaSync.db.ref('novacore/nova_sales').set(JSON.stringify(all)).then(function(){
       console.log('[SalesReset] Firebase updated for '+mk);
     }).catch(function(e){
       console.warn('[SalesReset] Firebase update failed:', e);
@@ -21954,7 +21949,7 @@ function salesSave(){
     alert('日付・部門・金額（正の値）は必須です');
     return;
   }
-  var all=salesLoadAll();
+  var all=salesLoadAllRaw();
   var editId=document.getElementById('salesEditId').value;
   if(editId){
     // Update
@@ -21984,7 +21979,11 @@ function salesSave(){
 
 function salesDelete(id){
   if(!confirm('この売上データを削除しますか？')) return;
-  var all=salesLoadAll().filter(function(r){return r.id!==id;});
+  // 物理削除ではなく tombstone(_deleted) を立てる。
+  // 物理削除するとFirebaseマージ時に旧レコードが復活する（削除が巻き戻る）ため。
+  var all=salesLoadAllRaw();
+  var rec=all.find(function(r){return r.id===id;});
+  if(rec) rec._deleted=Date.now();
   salesSaveAll(all);
   salesRender();
 }
@@ -24045,24 +24044,19 @@ function genTax(){
   expItems.forEach(function(e){totalExp+=e[1];});
   if(expItems.length===0) expItems=[['（経費データなし）',0]];
 
-  // Payroll from給与計算
-  var payrollData=JSON.parse(localStorage.getItem('payroll_v2_records')||'[]');
-  payrollData=payrollData.filter(function(p){return (p.yearMonth===mk)||(p.date&&p.date.substring(0,7)===mk);});
+  // Payroll from給与計算 (payroll_v2_records の実キー: month / grossSalary / health+pension+care+childSupport+employment / netSalary)
+  var payrollData=[];
+  try{ payrollData=JSON.parse(localStorage.getItem('payroll_v2_records')||'[]'); }catch(e){ payrollData=[]; }
+  payrollData=payrollData.filter(function(p){return p && p.month===mk;});
   var payrollTotal=0;var socialIns=0;var netPay=0;var staffCount=0;
   payrollData.forEach(function(p){
-    payrollTotal+=Number(p.total||p.gross||0);
-    socialIns+=Number(p.socialIns||p.deductions||0);
-    netPay+=Number(p.net||p.netPay||0);
+    payrollTotal+=Number(p.grossSalary||0);
+    socialIns+=Number(p.health||0)+Number(p.pension||0)+Number(p.care||0)+Number(p.childSupport||0)+Number(p.employment||0);
+    netPay+=Number(p.netSalary||0);
     staffCount++;
   });
-  if(staffCount===0){
-    // Fallback: use store config
-    var sc=JSON.parse(localStorage.getItem('annan_storeConfig')||'{}');
-    payrollTotal=Number(sc.employeeSalary||0);
-    socialIns=Math.round(payrollTotal*0.15);
-    netPay=payrollTotal-socialIns;
-    staffCount=payrollTotal>0?1:0;
-  }
+  // ※旧: 給与レコード0件時に annan_storeConfig から概算値を捏造するフォールバックがあったが、
+  //   実データと乖離した金額が税理士レポートに載るため撤去。0件なら0円と正直に表示する。
 
   // Invoices from invoice_history
   var invoices=JSON.parse(localStorage.getItem('invoice_history')||'[]');
@@ -24838,23 +24832,28 @@ window.addEventListener('message', function(e){
     } catch(err){}
 
     // Integrate into sales module
-    if(cat === 'sales' && data && data.totalSales){
-      var all = salesLoadAll();
-      // Remove old ancore revenue entries for this month
-      all = all.filter(function(r){
-        return !(r.source === 'ancore' && r.type !== 'expense' && r.date && r.date.substring(0,7) === month);
+    // ※ dataの存在のみで判定（totalSales=0円への修正再送も受け付ける）
+    if(cat === 'sales' && data){
+      var all = salesLoadAllRaw();
+      // 同月の旧ancoreレコードをtombstone化（物理削除だとFirebaseマージで復活し二重計上になる）
+      all.forEach(function(r){
+        if(r.source === 'ancore' && r.type !== 'expense' && !r._deleted && r.date && r.date.substring(0,7) === month){
+          r._deleted = Date.now();
+        }
       });
-      // Add new aggregated entry
-      all.push({
-        id: 's_ancore_' + month + '_' + Date.now(),
-        date: month + '-01',
-        dept: 'food',
-        type: 'revenue',
-        amount: data.totalSales,
-        memo: 'あん庵月次売上（' + data.days + '日分）',
-        source: 'ancore',
-        created: new Date().toISOString()
-      });
+      // Add new aggregated entry（0円の場合はレコード追加なし＝旧レコードの取り消しのみ）
+      if(Number(data.totalSales) > 0){
+        all.push({
+          id: 's_ancore_' + month + '_' + Date.now(),
+          date: month + '-01',
+          dept: 'food',
+          type: 'revenue',
+          amount: data.totalSales,
+          memo: 'あん庵月次売上（' + data.days + '日分）',
+          source: 'ancore',
+          created: new Date().toISOString()
+        });
+      }
       salesSaveAll(all);
       if(document.getElementById('p_sales').style.display !== 'none') salesRender();
       homeRender();
@@ -24863,10 +24862,12 @@ window.addEventListener('message', function(e){
     // Integrate expenses into sales module
     if(cat === 'expenses' && data && data.expensesByAccount){
       var ACCT_LABELS={purchase:'仕入',outsource:'外注費',commission:'支払手数料',tools:'ツール費',materials:'材料費',utilities:'水道光熱費',rent:'地代家賃',supplies:'消耗品費',welfare:'福利厚生費',legalWelfare:'法定福利費',shipping:'荷造運賃',advertising:'広告宣伝費',communication:'通信費',salary:'給料・賞与',labor:'人件費',depreciation:'減価償却費',vehicle:'車両費',misc:'雑費',insurance:'保険料（火災）'};
-      var all = salesLoadAll();
-      // Remove old ancore expense entries for this month
-      all = all.filter(function(r){
-        return !(r.source === 'ancore' && r.type === 'expense' && r.date && r.date.substring(0,7) === month);
+      var all = salesLoadAllRaw();
+      // 同月の旧ancore経費レコードをtombstone化（復活・二重計上防止）
+      all.forEach(function(r){
+        if(r.source === 'ancore' && r.type === 'expense' && !r._deleted && r.date && r.date.substring(0,7) === month){
+          r._deleted = Date.now();
+        }
       });
       // Add expense records by account
       var accts = data.expensesByAccount;
@@ -24952,7 +24953,8 @@ var novaSync = {
     'payroll_v2_bonus',
     'payroll_v2_rates',
     'payroll_v2_health_rates',
-    'payroll_v2_bank_accounts'
+    'payroll_v2_bank_accounts',
+    'payroll_v2_company_info'
   ],
   MERGE_KEYS: ['nova_events','nova_tasks','nova_posts','nova_sales','nova_members','nova_docs','nova_st3_daily','nova_st3_cats','nova_st3_costs','nova_feedback','expense-tracker-data-v2'],
   KEYS: {
@@ -24978,11 +24980,12 @@ var novaSync = {
     'payroll_v2_rates':'payroll_rates',
     'payroll_v2_health_rates':'payroll_health_rates',
     'payroll_v2_bank_accounts':'payroll_bank_accounts',
+    'payroll_v2_company_info':'payroll_company_info',
     'nova_members':'nova_members',
     'nova_posts':'nova_posts',
     'nova_tasks':'nova_tasks',
     'nova_events':'nova_events',
-    'rcpt_api_key':'rcpt_api_key',
+    // 'rcpt_api_key' は同期対象から除外（APIキーをFirebaseに載せない — 流出＝従量課金の不正利用リスク）
     'nova_feedback':'nova_feedback'
   },
   IFRAME_MAP: {
@@ -24994,7 +24997,8 @@ var novaSync = {
     'bank_master':'p_invoices',
     'doc_number_counter':'p_invoices',
     'payroll_v2_employees':'p_payroll','payroll_v2_records':'p_payroll','payroll_v2_bonus':'p_payroll',
-    'payroll_v2_rates':'p_payroll','payroll_v2_health_rates':'p_payroll','payroll_v2_bank_accounts':'p_payroll'
+    'payroll_v2_rates':'p_payroll','payroll_v2_health_rates':'p_payroll','payroll_v2_bank_accounts':'p_payroll',
+    'payroll_v2_company_info':'p_payroll'
   },
   init: function(){
     try {
@@ -25006,7 +25010,11 @@ var novaSync = {
           self.ready = true;
           self.pullAll();
           if(!self._listening){ self.listenAll(); self._listening=true; }
-          self._flushPending();
+          // ※ _flushPending はここでは呼ばない（pullAllは非同期のため、pull完了前に
+          //   flushするとFIREBASE_WINSキーが再び保留されたまま二度と送信されない）。
+          //   pullAll の完了コールバック内で呼ぶ。
+          // セキュリティ: 過去に同期されたAPIキーをFirebaseから削除（同期対象からは除外済み）
+          try{ self.db.ref('novacore/rcpt_api_key').remove().catch(function(){}); }catch(e){}
           var dot = document.querySelector('.bdg-sync');
           if(dot) dot.textContent = '● 同期中';
         } else {
@@ -25029,9 +25037,13 @@ var novaSync = {
     if(this.syncing[lsKey]) return;
     var fbKey = this.KEYS[lsKey];
     if(!fbKey) return;
-    // Firebase優先キーはpullComplete前のpushを完全ブロック（レースコンディション防止）
+    // Firebase優先キーはpullComplete前のpushを保留（レースコンディション防止）
+    // ※旧実装は保留せず「破棄」していたため、pull完了前の編集が次回リロードで
+    //   Firebaseの古いデータに巻き戻されるバグがあった（給与データ消失の原因）。
+    //   _pendingPush に積んでおき、pull完了後の _flushPending で送信する。
     if(this.FIREBASE_WINS_KEYS.indexOf(lsKey) !== -1 && !this._pullComplete){
-      console.log('[NovaSync] Push blocked until pull complete for: '+lsKey);
+      this._pendingPush[lsKey]=true;
+      console.log('[NovaSync] Push queued until pull complete for: '+lsKey);
       return;
     }
     if(!this.db || !this.ready){
@@ -25127,6 +25139,12 @@ var novaSync = {
       for(var lsKey in self.KEYS){
         var fbKey = self.KEYS[lsKey];
         if(data[fbKey] !== undefined && data[fbKey] !== null){
+          // pull完了前にローカルで編集されたキー（_pendingPush）はFirebaseで上書きしない。
+          // ローカルの方が新しいため、後続の _flushPending でローカル→Firebaseに送る。
+          if(self._pendingPush[lsKey]){
+            console.log('[NovaSync] Pull skipped for locally-edited key: '+lsKey);
+            continue;
+          }
           var current = localStorage.getItem(lsKey);
           if(current !== data[fbKey]){
             self.syncing[lsKey] = true;
@@ -25154,6 +25172,8 @@ var novaSync = {
       console.log('[NovaSync] Pull complete (pushback done), updated: '+updatedKeys.length);
       self._pullDone=true;
       self._pullComplete=true;
+      // pull完了後に、保留されていたローカル編集をFirebaseへ送信
+      self._flushPending();
       MEMBERS=loadMembers();
       // Notify all updated iframes after a short delay to ensure they are loaded
       setTimeout(function(){
@@ -25176,6 +25196,8 @@ var novaSync = {
         var fbKey = self.KEYS[key];
         self.db.ref('novacore/'+fbKey).on('value', function(snap){
           if(self.syncing[key]) return;
+          // 送信待ちのローカル編集がある間はFirebase値で上書きしない（編集消失防止）
+          if(self._pendingPush[key]) return;
           var val = snap.val();
           if(val === null || val === undefined) return;
           var current = localStorage.getItem(key);
