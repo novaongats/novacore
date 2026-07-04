@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex">
+<title>NOVACore データ復旧ツール</title>
+<style>
+  body { font-family: 'Noto Sans JP', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1e293b; }
+  h1 { font-size: 20px; }
+  .warn { background: #fef2f2; border: 1px solid #fecaca; padding: 12px; border-radius: 8px; margin: 16px 0; }
+  button { background: #dc2626; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  button:disabled { background: #cbd5e1; cursor: not-allowed; }
+  pre { background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  table { border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left; }
+</style>
+</head>
+<body>
+<h1>🛟 NOVACore 給与データ復旧ツール</h1>
+<div class="warn">
+  このページは同期コード（novaSync）を含まないため、開いても localStorage のデータは変更されません。<br>
+  この端末の localStorage に残っている給与データを Firebase に書き戻します。
+</div>
+<div id="status">確認中...</div>
+<table id="tbl"><thead><tr><th>キー</th><th>ローカル (この端末)</th><th>Firebase (現在)</th></tr></thead><tbody></tbody></table>
+<button id="restoreBtn" disabled>🛟 ローカルのデータを Firebase に復元する</button>
+<pre id="report"></pre>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyCA4bkG1VV1ad-7FldSxXEd3reG7vnYnTQ",
+  authDomain: "novacore-65fb5.firebaseapp.com",
+  databaseURL: "https://novacore-65fb5-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "novacore-65fb5",
+  storageBucket: "novacore-65fb5.firebasestorage.app",
+  messagingSenderId: "1031615296415",
+  appId: "1:1031615296415:web:eb9fb2a4186798022983aa"
+});
+const db = firebase.database();
+
+// 復旧対象: FIREBASE_WINS キー（給与計算系）
+const KEYS = {
+  'payroll_v2_employees':   'payroll_employees',
+  'payroll_v2_records':     'payroll_records',
+  'payroll_v2_bonus':       'payroll_bonus',
+  'payroll_v2_rates':       'payroll_rates',
+  'payroll_v2_health_rates':'payroll_health_rates',
+  'payroll_v2_bank_accounts':'payroll_bank_accounts',
+  'payroll_v2_company_info':'payroll_company_info',
+};
+
+function summarize(raw) {
+  if (raw == null) return '(なし)';
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) return v.length + '件 (' + raw.length + '文字)';
+    if (typeof v === 'object') return Object.keys(v).length + 'キー (' + raw.length + '文字)';
+    return String(raw).slice(0, 30);
+  } catch (e) { return raw.length + '文字 (JSON不正)'; }
+}
+
+const localVals = {};
+async function scan() {
+  const tbody = document.querySelector('#tbl tbody');
+  let restorable = 0;
+  for (const lsKey in KEYS) {
+    const local = localStorage.getItem(lsKey);
+    localVals[lsKey] = local;
+    const snap = await db.ref('novacore/' + KEYS[lsKey]).once('value');
+    const remote = snap.val();
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + lsKey + '</td><td>' + summarize(local) + '</td><td>' + summarize(remote) + '</td>';
+    tbody.appendChild(tr);
+    if (local && local !== '[]' && local !== '{}' && local !== 'null') restorable++;
+  }
+  document.getElementById('status').textContent =
+    restorable > 0
+      ? '✅ この端末に復元可能なデータが ' + restorable + ' キーあります。下のボタンで Firebase に書き戻せます。'
+      : '⚠️ この端末の localStorage に給与データがありません。データが残っている端末でこのページを開いてください。';
+  document.getElementById('restoreBtn').disabled = restorable === 0;
+}
+
+document.getElementById('restoreBtn').onclick = async function () {
+  this.disabled = true;
+  const report = [];
+  for (const lsKey in KEYS) {
+    const local = localVals[lsKey];
+    if (local && local !== '[]' && local !== '{}' && local !== 'null') {
+      try {
+        await db.ref('novacore/' + KEYS[lsKey]).set(local);
+        report.push('✅ ' + lsKey + ' → 復元完了 (' + summarize(local) + ')');
+      } catch (e) {
+        report.push('❌ ' + lsKey + ' → 失敗: ' + e.message);
+      }
+    } else {
+      report.push('⏭ ' + lsKey + ' → ローカルにデータなし (スキップ)');
+    }
+  }
+  document.getElementById('report').textContent = report.join('\n');
+  document.getElementById('status').textContent = '復元処理が完了しました。上の表を確認してください。';
+};
+
+scan();
+</script>
+</body>
+</html>
