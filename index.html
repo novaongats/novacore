@@ -11662,7 +11662,27 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             win.document.close();
         }
         
-        function printEmployeeList() { window.print(); }
+        function printEmployeeList() {
+            // 共通帳票システム (parent.novaReport) で統一デザイン出力
+            const active = employees.filter(isActiveEmployee);
+            if (active.length === 0) { alert('従業員が登録されていません'); return; }
+            const txLabel = c => c === 'otsu' ? '乙欄' : '甲欄';
+            let rows = '';
+            active.forEach(e => {
+                rows += `<tr><td>${e.id}</td><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.nameKana||'')}</td>`
+                    + `<td>${empTypeLabels[e.type]||e.type||''}</td><td class='num'>${e.dependents||0}人</td><td>${txLabel(e.taxColumn)}</td>`
+                    + `<td class='num'>${formatCurrency(e.standardRemuneration||0)}</td><td class='num'>${formatCurrency(e.healthAmount||0)}</td>`
+                    + `<td class='num'>${formatCurrency(e.pensionAmount||0)}</td><td class='num'>${formatCurrency(e.careAmount||0)}</td>`
+                    + `<td class='num'>${formatCurrency(e.childSupportAmount||0)}</td><td class='num'>${formatCurrency(e.residentTax||0)}</td></tr>`;
+            });
+            const body = `<table class='rpt'><thead><tr><th>ID</th><th>氏名</th><th>フリガナ</th><th>雇用形態</th><th>扶養</th><th>税区分</th>`
+                + `<th>標準報酬月額</th><th>健康保険</th><th>厚生年金</th><th>介護保険</th><th>子育て支援金</th><th>住民税</th></tr></thead>`
+                + `<tbody>${rows}</tbody></table>`
+                + `<div class='rpt-note'>※社会保険料は本人負担分（月額）。「扶養」は源泉控除対象扶養親族等の数（16歳未満は含めない）。</div>`;
+            try {
+                parent.novaReport.open({ title: '従業員一覧', subtitle: '在籍 ' + active.length + '名', orientation: 'landscape', bodyHtml: body });
+            } catch (e) { window.print(); }
+        }
         function showBulkPrintModal() {
             const month = document.getElementById('list-month').value;
             if (!month) {
@@ -11992,7 +12012,39 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         function printAssessment() {
-            window.print();
+            // 共通帳票システムで統一デザイン出力（旧: 画面テーブルの素の window.print）
+            if (!assessmentData || assessmentData.length === 0) {
+                alert('先に「算定基礎届を計算」を実行してください');
+                return;
+            }
+            const year = document.getElementById('assessment-year')?.value || new Date().getFullYear();
+            const money = n => formatCurrency(n || 0);
+            const mCell = (amt, days, used) =>
+                amt === 0 ? `<td class='num' style='color:#999'>-</td>`
+                : `<td class='num'${used ? '' : ` style='background:#fee2e2'`}>${money(amt)}<br><span style='font-size:7.5pt;color:#666'>(${days}日${used ? '' : '・除外'})</span></td>`;
+            let rows = '';
+            assessmentData.forEach(d => {
+                if (d.skipped) {
+                    rows += `<tr><td>${d.empId}</td><td>${escapeHtml(d.empName)}</td>`
+                        + mCell(d.aprAmt, d.aprDays, d.aprUsed) + mCell(d.mayAmt, d.mayDays, d.mayUsed) + mCell(d.junAmt, d.junDays, d.junUsed)
+                        + `<td colspan='6' style='background:#fef3c7'>${escapeHtml(d.skipReason || '')} → 算定対象外（届出不要）</td></tr>`;
+                } else {
+                    rows += `<tr><td>${d.empId}</td><td>${escapeHtml(d.empName)}</td>`
+                        + mCell(d.aprAmt, d.aprDays, d.aprUsed) + mCell(d.mayAmt, d.mayDays, d.mayUsed) + mCell(d.junAmt, d.junDays, d.junUsed)
+                        + `<td class='num'>${money(d.avg)}<br><span style='font-size:7.5pt;color:#666'>(${d.eligibleCount}月平均)</span></td>`
+                        + `<td class='num' style='font-weight:700'>${money(d.std)}</td>`
+                        + `<td class='num'>${money(d.health)}</td><td class='num'>${money(d.pension)}</td>`
+                        + `<td class='num'>${money(d.care)}</td><td class='num'>${money(d.childSupport)}</td></tr>`;
+                }
+            });
+            const body = `<table class='rpt'><thead><tr><th>ID</th><th>氏名</th><th>4月</th><th>5月</th><th>6月</th>`
+                + `<th>平均報酬</th><th>標準報酬月額</th><th>健康保険</th><th>厚生年金</th><th>介護保険</th><th>子育て支援金</th></tr></thead>`
+                + `<tbody>${rows}</tbody></table>`
+                + `<div class='rpt-note'>※4〜6月の報酬月額から算定（支払基礎日数17日未満の月は除外）。保険料は本人負担分（月額）。`
+                + `本表は社内確認用であり、年金事務所への提出は所定の「算定基礎届」様式または電子申請によります。9月分保険料から適用。</div>`;
+            try {
+                parent.novaReport.open({ title: '算定基礎届（定時決定）計算結果', subtitle: year + '年 算定（4〜6月平均）', orientation: 'landscape', bodyHtml: body });
+            } catch (e) { window.print(); }
         }
 
         // ============================================================
@@ -13540,9 +13592,9 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         function generateBonusSlipHTML(data) {
             document.getElementById('bonus-slip-content').innerHTML = `
-                <div style=&quot;text-align:center;border-bottom:2px solid var(--primary);padding-bottom:15px;margin-bottom:14px;&quot;>
-                    <div style=&quot;font-size:20px;font-weight:700;color:var(--primary);&quot;>賞与明細書</div>
-                    <div style=&quot;font-size:12px;color:#8b8ba0;margin-top:5px;&quot;>${data.month} 分</div>
+                <div style=&quot;text-align:center;border-bottom:2.5px solid #111;padding-bottom:15px;margin-bottom:14px;&quot;>
+                    <div style=&quot;font-size:20px;font-weight:700;color:#111;letter-spacing:.15em;&quot;>賞 与 明 細 書</div>
+                    <div style=&quot;font-size:12px;color:#555;margin-top:5px;&quot;>${data.month} 分</div>
                 </div>
                 <!-- 発行者（会社情報）-->
                 <div style=&quot;display:flex;justify-content:space-between;margin-bottom:14px;font-size:10px;color:#000;&quot;>
@@ -13557,7 +13609,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     </div>
                 </div>
                 <!-- 従業員情報 -->
-                <div style=&quot;display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:14px;font-size:11px;padding:8px;background:#f5f5f5;border-left:4px solid var(--primary);&quot;>
+                <div style=&quot;display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:14px;font-size:11px;padding:8px;background:#f5f5f5;border-left:4px solid #111;&quot;>
                     <div><strong>従業員ID:</strong> ${data.empId}<br><strong>氏名:</strong> ${escapeHtml(data.empName)} 殿</div>
                     <div style=&quot;text-align:right;&quot;>
                         ${data.bonusStd ? `<div><span style=&quot;font-size:9px;color:#666;&quot;>標準賞与額:</span> ${formatCurrency(data.bonusStd)}</div>` : ''}
@@ -13569,7 +13621,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     </tbody>
                 </table>
                 <table style=&quot;width:100%;border-collapse:collapse;margin-bottom:15px;font-size:10px;&quot;>
-                    <thead><tr><th colspan=&quot;2&quot; style=&quot;background:#dc2626;color:white;padding:8px;text-align:left;&quot;>控除項目</th></tr></thead>
+                    <thead><tr><th colspan=&quot;2&quot; style=&quot;background:#111;color:white;padding:8px;text-align:left;letter-spacing:.1em;&quot;>控 除</th></tr></thead>
                     <tbody>
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>健康保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.health)}</td></tr>
                         <tr><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>厚生年金保険料</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.pension)}</td></tr>
@@ -13580,7 +13632,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         <tr style=&quot;background:#eaecf3;font-weight:bold;&quot;><td style=&quot;padding:6px;border:1px solid #e0e2ec;&quot;>控除合計</td><td style=&quot;padding:6px;border:1px solid #e0e2ec;text-align:right;&quot;>${formatCurrency(data.totalDed)}</td></tr>
                     </tbody>
                 </table>
-                <div style=&quot;background:var(--primary);color:white;padding:12px;border-radius:6px;text-align:right;font-size:16px;font-weight:700;&quot;>
+                <div style=&quot;background:#111;color:white;padding:12px;text-align:right;font-size:16px;font-weight:700;&quot;>
                     差引支給額: ${formatCurrency(data.netAmount)}
                 </div>
             `;
@@ -14681,6 +14733,132 @@ function salesSaveAll(arr){
 }
 function salesFmt(n){ return '¥'+Number(n||0).toLocaleString(); }
 
+/* ============================================================
+   NOVA UI v23 — 全フレーム統一デザインレイヤー
+   親ウィンドウで1箇所定義し、全iframeのdocumentに注入する。
+   既存のHTML構造・クラスには触れない「上書き型」のため機能を壊さない。
+   ============================================================ */
+var NOVA_UI_CSS = [
+'/* NOVA UI v23 unified design layer */',
+':root{--nv-primary:#6366f1;--nv-primary-dark:#5558e6;--nv-success:#10b981;--nv-danger:#ef4444;--nv-warning:#f59e0b;--nv-info:#3b82f6;--nv-text:#0f172a;--nv-text2:#475569;--nv-text3:#8b8ba0;--nv-border:#e0e2ec;--nv-bg:#f4f6fa;--nv-card:#ffffff;--nv-radius:10px;--nv-radius-sm:8px;--nv-focus:0 0 0 3px rgba(99,102,241,.16)}',
+'button,input,select,textarea{font-family:inherit}',
+'input:focus,select:focus,textarea:focus{outline:none!important;border-color:var(--nv-primary)!important;box-shadow:var(--nv-focus)!important}',
+'.btn{border-radius:var(--nv-radius-sm)!important;font-weight:600!important;cursor:pointer;transition:filter .15s,transform .08s,box-shadow .15s!important}',
+'.btn:hover{filter:brightness(1.07);box-shadow:0 2px 10px rgba(15,23,42,.13)}',
+'.btn:active{transform:translateY(1px)}',
+'.btn:disabled{opacity:.5;cursor:not-allowed;filter:none;box-shadow:none}',
+'.sbtn{border-radius:8px!important;transition:filter .15s!important}',
+'.sbtn:hover{filter:brightness(1.05)}',
+'tbody tr:hover{background:rgba(99,102,241,.05)}',
+'::-webkit-scrollbar{width:8px;height:8px}',
+'::-webkit-scrollbar-track{background:transparent}',
+'::-webkit-scrollbar-thumb{background:#cdd2e0;border-radius:99px}',
+'::-webkit-scrollbar-thumb:hover{background:#aab1c5}',
+'::selection{background:rgba(99,102,241,.22)}',
+'/* 給与ページの極小フォント救済（高齢の操作者対応: 9px→11.5px以上） */',
+'#payroll-table th,#payroll-table td{font-size:11.5px!important;padding:6px 5px!important}',
+'#employee-table th,#employee-table td{font-size:12px!important}',
+'#assessment-table th,#assessment-table td{font-size:11.5px!important}',
+'.card{border-radius:var(--nv-radius)}'
+].join('\n');
+
+function novaInjectUI(doc){
+  try{
+    if(!doc || !doc.head || doc.getElementById('nova-ui-v23')) return;
+    var st=doc.createElement('style');
+    st.id='nova-ui-v23';
+    st.textContent=NOVA_UI_CSS;
+    doc.head.appendChild(st);
+  }catch(e){}
+}
+function novaInjectAll(){
+  novaInjectUI(document);
+  document.querySelectorAll('iframe.pg').forEach(function(f){
+    try{ novaInjectUI(f.contentDocument); }catch(e){}
+    if(!f._novaUiHooked){
+      f._novaUiHooked=true;
+      f.addEventListener('load', function(){ try{ novaInjectUI(f.contentDocument); }catch(e){} });
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', novaInjectAll);
+setTimeout(novaInjectAll, 1500);
+setTimeout(novaInjectAll, 4000);
+
+/* ============================================================
+   NOVA Report v1 — 共通帳票システム
+   全帳票を統一デザイン (会社ヘッダー + A4 + 共通表スタイル) で出力する。
+   iframe からは parent.novaReport.open({...}) で呼び出す。
+   ============================================================ */
+function novaGetCompanyInfo(){
+  try{
+    var ci=JSON.parse(localStorage.getItem('payroll_v2_company_info')||'{}');
+    return {
+      name: ci.name || '有限会社NOVA',
+      representative: ci.representative || '',
+      address: ci.address || '',
+      phone: ci.phone || ''
+    };
+  }catch(e){ return {name:'有限会社NOVA',representative:'',address:'',phone:''}; }
+}
+var novaReport = {
+  css: function(orient){
+    return [
+      '*{box-sizing:border-box;margin:0;padding:0}',
+      "body{font-family:'Noto Sans JP','Yu Gothic',Meiryo,sans-serif;color:#111;font-size:10.5pt;line-height:1.55;padding:6mm 4mm;background:#fff}",
+      '.rpt-toolbar{position:fixed;top:10px;right:10px;display:flex;gap:8px;background:rgba(255,255,255,.96);padding:6px 10px;border:1px solid #ccc;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.12);z-index:9}',
+      '.rpt-toolbar button{background:#4f46e5;color:#fff;border:none;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit}',
+      '.rpt-toolbar button.sec{background:#6b7280}',
+      '.rpt-header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #111;padding-bottom:8px;margin-bottom:12px;gap:16px}',
+      '.rpt-header h1{font-size:16.5pt;font-weight:700;letter-spacing:.05em}',
+      '.rpt-sub{font-size:10pt;color:#444;margin-top:3px}',
+      '.rpt-company{text-align:right;font-size:8.5pt;color:#333;line-height:1.6;flex-shrink:0}',
+      '.rpt-co-name{font-size:11pt;font-weight:700;color:#111}',
+      'table.rpt{width:100%;border-collapse:collapse;font-size:9.5pt;margin:8px 0}',
+      'table.rpt th{background:#f1f5f9;border:1px solid #94a3b8;padding:6px 8px;font-weight:700;text-align:center}',
+      'table.rpt td{border:1px solid #94a3b8;padding:5px 8px}',
+      'table.rpt td.num{text-align:right;font-variant-numeric:tabular-nums}',
+      'table.rpt tr.total td{border-top:2px solid #111;font-weight:700;background:#f8fafc}',
+      'table.rpt tr:nth-child(even) td{background:#fafbfd}',
+      'table.rpt tr.total:nth-child(even) td{background:#f8fafc}',
+      '.rpt-section{font-size:11pt;font-weight:700;border-left:4px solid #6366f1;padding-left:8px;margin:14px 0 6px;page-break-after:avoid}',
+      '.rpt-note{font-size:8.5pt;color:#555;margin-top:4px}',
+      '.rpt-kpis{display:flex;gap:10px;margin:8px 0}',
+      '.rpt-kpi{flex:1;border:1px solid #94a3b8;border-radius:6px;padding:8px 12px}',
+      '.rpt-kpi .l{font-size:8.5pt;color:#555}',
+      '.rpt-kpi .v{font-size:14pt;font-weight:700;font-variant-numeric:tabular-nums}',
+      '.rpt-footer{margin-top:14px;border-top:1px solid #999;padding-top:6px;display:flex;justify-content:space-between;font-size:8pt;color:#666}',
+      'tr{page-break-inside:avoid}',
+      '@media print{.no-print{display:none!important}body{padding:0}}',
+      '@page{size:A4 '+(orient==='landscape'?'landscape':'portrait')+';margin:11mm 10mm}'
+    ].join('\n');
+  },
+  open: function(o){
+    var ci=novaGetCompanyInfo();
+    var stamp=new Date().toLocaleString('ja-JP');
+    var html='<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>'+(o.title||'帳票')+'</title><style>'+this.css(o.orientation)+'</style></head><body>'
+      +'<div class="rpt-toolbar no-print"><button onclick="window.print()">🖨 印刷</button><button class="sec" onclick="window.close()">閉じる</button></div>'
+      +'<header class="rpt-header"><div><h1>'+(o.title||'')+'</h1>'
+      +(o.subtitle?'<div class="rpt-sub">'+o.subtitle+'</div>':'')
+      +'</div><div class="rpt-company"><div class="rpt-co-name">'+ci.name+'</div>'
+      +(ci.address?'<div>'+ci.address+'</div>':'')
+      +(ci.phone?'<div>TEL: '+ci.phone+'</div>':'')
+      +'<div>出力日時: '+stamp+'</div></div></header>'
+      +(o.bodyHtml||'')
+      +'<footer class="rpt-footer"><span>'+ci.name+' / NOVA Core</span><span>'+stamp+'</span></footer>'
+      +(o.noAutoPrint?'':'<scr'+'ipt>window.addEventListener("load",function(){setTimeout(function(){window.print();},250);});</scr'+'ipt>')
+      +'</body></html>';
+    var w=window.open('','_blank','width=1150,height=800');
+    if(!w){
+      alert('ポップアップがブロックされました。\nブラウザのアドレスバー右側のアイコンから「ポップアップを許可」してください。');
+      return null;
+    }
+    w.document.open(); w.document.write(html); w.document.close();
+    return w;
+  }
+};
+window.novaReport = novaReport;
+
 function salesChangeMonth(delta){
   var parts=salesMonth.split('-');
   var y=parseInt(parts[0]), m=parseInt(parts[1])+delta;
@@ -14689,13 +14867,67 @@ function salesChangeMonth(delta){
   salesMonth=y+'-'+String(m).padStart(2,'0');
   salesRender();
 }
-function salesPrint(){window.print();}
+// 月次売上レポートの帳票ボディを生成 (novaReport用)
+function salesBuildReportBody(mk){
+  var d=salesGetMonthData(mk);
+  var revenues=d.filter(function(r){return r.type!=='expense';});
+  var expenses=d.filter(function(r){return r.type==='expense';});
+  var totalRev=0;revenues.forEach(function(r){totalRev+=Number(r.amount||0);});
+  var totalExp=0;expenses.forEach(function(r){totalExp+=Number(r.amount||0);});
+  var ACCT={purchase:'仕入',outsource:'外注費',commission:'支払手数料',tools:'ツール費',materials:'材料費',utilities:'水道光熱費',rent:'地代家賃',supplies:'消耗品費',welfare:'福利厚生費',legalWelfare:'法定福利費',shipping:'荷造運賃',advertising:'広告宣伝費',communication:'通信費',salary:'給料・賞与',labor:'人件費',depreciation:'減価償却費',vehicle:'車両費',misc:'雑費',insurance:'保険料',cashbook:'現金出納帳'};
+
+  var h='<div class="rpt-kpis">'
+    +'<div class="rpt-kpi"><div class="l">売上合計</div><div class="v">'+salesFmt(totalRev)+'</div></div>'
+    +'<div class="rpt-kpi"><div class="l">経費合計（人件費含む）</div><div class="v">'+salesFmt(totalExp)+'</div></div>'
+    +'<div class="rpt-kpi"><div class="l">営業利益</div><div class="v" style="color:#1e40af">'+salesFmt(totalRev-totalExp)+'</div></div>'
+    +'</div>';
+
+  // 部門別収支
+  h+='<div class="rpt-section">部門別収支</div><table class="rpt"><thead><tr><th>部門</th><th>売上</th><th>経費</th><th>収支</th></tr></thead><tbody>';
+  SALES_DEPTS.concat([{key:'honbu',label:'本部'}]).forEach(function(dep){
+    var rv=0;revenues.forEach(function(r){if(r.dept===dep.key)rv+=Number(r.amount||0);});
+    var ex=0;expenses.forEach(function(r){if(r.dept===dep.key)ex+=Number(r.amount||0);});
+    if(rv===0&&ex===0)return;
+    h+='<tr><td>'+dep.label+'</td><td class="num">'+salesFmt(rv)+'</td><td class="num">'+salesFmt(ex)+'</td><td class="num">'+salesFmt(rv-ex)+'</td></tr>';
+  });
+  h+='<tr class="total"><td>合計</td><td class="num">'+salesFmt(totalRev)+'</td><td class="num">'+salesFmt(totalExp)+'</td><td class="num">'+salesFmt(totalRev-totalExp)+'</td></tr></tbody></table>';
+
+  // 経費内訳（勘定科目別）
+  var expCats={};
+  expenses.forEach(function(e){var c=ACCT[e.category]||e.category||'その他';expCats[c]=(expCats[c]||0)+Number(e.amount||0);});
+  var catKeys=Object.keys(expCats).sort(function(a,b){return expCats[b]-expCats[a];});
+  if(catKeys.length>0){
+    h+='<div class="rpt-section">経費内訳（勘定科目別）</div><table class="rpt"><thead><tr><th>勘定科目</th><th>金額</th></tr></thead><tbody>';
+    catKeys.forEach(function(k){h+='<tr><td>'+k+'</td><td class="num">'+salesFmt(expCats[k])+'</td></tr>';});
+    h+='<tr class="total"><td>合計</td><td class="num">'+salesFmt(totalExp)+'</td></tr></tbody></table>';
+  }
+
+  // 売上明細
+  if(revenues.length>0){
+    var deptLabel={};SALES_DEPTS.forEach(function(x){deptLabel[x.key]=x.label;});deptLabel.honbu='本部';
+    h+='<div class="rpt-section">売上明細（'+revenues.length+'件）</div><table class="rpt"><thead><tr><th>日付</th><th>部門</th><th>内容</th><th>金額</th></tr></thead><tbody>';
+    revenues.slice().sort(function(a,b){return (a.date||'').localeCompare(b.date||'');}).forEach(function(r){
+      h+='<tr><td>'+(r.date||'')+'</td><td>'+(deptLabel[r.dept]||r.dept||'')+'</td><td>'+String(r.memo||'').replace(/</g,'&lt;')+'</td><td class="num">'+salesFmt(r.amount)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+  return h;
+}
+function salesPrint(){
+  var parts=salesMonth.split('-');
+  novaReport.open({
+    title:'月次売上レポート',
+    subtitle:'対象期間: '+parts[0]+'年'+parseInt(parts[1])+'月',
+    orientation:'portrait',
+    bodyHtml:salesBuildReportBody(salesMonth)
+  });
+}
 function salesPdf(){
   var docs=JSON.parse(localStorage.getItem('nova_docs')||'[]');
   docs.push({id:'doc_'+Date.now(),title:'売上管理_'+salesMonth,date:new Date().toISOString().substring(0,10),category:'pdf_export',note:'売上管理 '+salesMonth+' PDF出力',created:new Date().toISOString(),source:'auto'});
   localStorage.setItem('nova_docs',JSON.stringify(docs));
   if(typeof novaSync!=='undefined')novaSync.push('nova_docs');
-  setTimeout(function(){window.print();},200);
+  salesPrint();
 }
 
 function salesResetMonth(){
@@ -17456,7 +17688,7 @@ function genTax(){
     {t:'① 売上集計表',c:'#6366f1',d:SALES_DEPTS.map(function(d){return [d.label,f(deptSales[d.key])];}).concat([['合計',f(totalSales),1]])},
     {t:'② 経費一覧',c:'#7c3aed',d:expItems.map(function(e){return [e[0],f(e[1])];}).concat([['合計',f(totalExp),1]])},
     {t:'③ 給与支払',c:'#d97706',d:[['給与総額（'+staffCount+'名）',f(payrollTotal)],['社保',f(socialIns)],['支給額',f(netPay),1]]},
-    {t:'④ 請求書',c:'#e11d48',d:[['発行 '+invCount+'件',f(invTotal)],['未入金',f(Math.max(0,invTotal-Math.round(invTotal*0.2))),1]]},
+    {t:'④ 請求書',c:'#e11d48',d:[['発行 '+invCount+'件',f(invTotal),1]]},
     {t:'⑤ 消費税',c:'#0d9488',d:[['仮受消費税',f(recvTax)],['差引納付',f(taxEst),1]]},
     {t:'⑥ 損益計算書',c:'#d97706',d:[['売上高',f(totalSales)],['経費+人件費',f(totalExp+effectivePayroll)],['営業利益',f(grossProfit),1]]},
     {t:'⑦ 添付書類',c:'#059669',d:[['登録書類',monthDocs.length+'件',1]]}
@@ -17476,31 +17708,33 @@ function taxExportPDF(){
   if(!taxLastData){alert('先にレポートを生成してください');return;}
   var d=taxLastData;var f=function(n){return '¥'+Number(n||0).toLocaleString();};
   var mk=d.mk;var label=mk.replace('-','年')+'月';
-  var win=window.open('','_blank','width=800,height=600');
-  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>税理士レポート '+label+'</title>');
-  win.document.write('<style>*{font-family:"Noto Sans JP",sans-serif;margin:0;padding:0;box-sizing:border-box}body{padding:30px;font-size:12px;color:#1e293b}h1{font-size:18px;text-align:center;margin-bottom:4px}h2{font-size:14px;margin:16px 0 8px;padding:6px 10px;background:#eaecf3;border-left:4px solid #6366f1;border-radius:4px}.sub{text-align:center;font-size:11px;color:#8b8ba0;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-bottom:12px}th,td{padding:6px 10px;text-align:left;border-bottom:1px solid #e0e2ec;font-size:12px}th{background:#f4f6fa;font-weight:600;color:#64748b}.r{text-align:right;font-family:monospace}.b{font-weight:700;background:#f4f6fa}.footer{margin-top:24px;text-align:center;font-size:10px;color:#94a3b8}@media print{@page{size:A4;margin:15mm}}</style></head><body>');
-  win.document.write('<h1>📋 税理士レポート</h1><div class="sub">'+label+' | 有限会社NOVA | 生成日: '+new Date().toLocaleDateString('ja-JP')+'</div>');
-  // 1. Sales
-  win.document.write('<h2>① 売上集計表</h2><table>');
-  SALES_DEPTS.forEach(function(dept){win.document.write('<tr><td>'+dept.label+'</td><td class="r">'+f(d.deptSales[dept.key])+'</td></tr>');});
-  win.document.write('<tr class="b"><td>合計</td><td class="r">'+f(d.totalSales)+'</td></tr></table>');
-  // 2. Expenses
-  win.document.write('<h2>② 経費一覧</h2><table>');
-  d.expItems.forEach(function(e){win.document.write('<tr><td>'+e[0]+'</td><td class="r">'+f(e[1])+'</td></tr>');});
-  win.document.write('<tr class="b"><td>合計</td><td class="r">'+f(d.totalExp)+'</td></tr></table>');
-  // 3. Payroll
-  win.document.write('<h2>③ 給与支払</h2><table><tr><td>給与総額（'+d.staffCount+'名）</td><td class="r">'+f(d.payrollTotal)+'</td></tr><tr><td>社会保険料</td><td class="r">'+f(d.socialIns)+'</td></tr><tr class="b"><td>支給額</td><td class="r">'+f(d.netPay)+'</td></tr></table>');
-  // 4. Invoices
-  win.document.write('<h2>④ 請求書</h2><table><tr><td>発行 '+d.invCount+'件</td><td class="r">'+f(d.invTotal)+'</td></tr><tr class="b"><td>未入金</td><td class="r">'+f(Math.max(0,d.invTotal-Math.round(d.invTotal*0.2)))+'</td></tr></table>');
-  // 5. Tax
-  win.document.write('<h2>⑤ 消費税</h2><table><tr><td>仮受消費税</td><td class="r">'+f(d.recvTax)+'</td></tr><tr class="b"><td>差引納付</td><td class="r">'+f(d.taxEst)+'</td></tr></table>');
-  // 6. PL
-  win.document.write('<h2>⑥ 損益計算書</h2><table><tr><td>売上高</td><td class="r">'+f(d.totalSales)+'</td></tr><tr><td>経費+人件費</td><td class="r">'+f(d.totalExp+(d.effectivePayroll!==undefined?d.effectivePayroll:d.payrollTotal))+'</td></tr><tr class="b"><td>営業利益</td><td class="r">'+f(d.grossProfit)+'</td></tr></table>');
-  // 7. Docs
-  win.document.write('<h2>⑦ 添付書類</h2><table><tr class="b"><td>登録書類</td><td class="r">'+d.docCount+'件</td></tr></table>');
-  win.document.write('<div class="footer">有限会社NOVA 税理士レポート自動生成 | NovaCoreシステム</div></body></html>');
-  win.document.close();
-  setTimeout(function(){win.print();},500);
+  var tbl=function(rows){
+    var h='<table class="rpt"><tbody>';
+    rows.forEach(function(r){h+='<tr'+(r[2]?' class="total"':'')+'><td>'+r[0]+'</td><td class="num" style="width:35%">'+r[1]+'</td></tr>';});
+    return h+'</tbody></table>';
+  };
+  var body='';
+  body+='<div class="rpt-section">① 売上集計表</div>'+tbl(
+    SALES_DEPTS.map(function(dept){return [dept.label,f(d.deptSales[dept.key])];}).concat([['合計',f(d.totalSales),1]]));
+  body+='<div class="rpt-section">② 経費一覧</div>'+tbl(
+    d.expItems.map(function(e){return [e[0],f(e[1])];}).concat([['合計',f(d.totalExp),1]]));
+  body+='<div class="rpt-section">③ 給与支払</div>'+tbl([
+    ['給与総額（'+d.staffCount+'名）',f(d.payrollTotal)],['社会保険料（本人負担分）',f(d.socialIns)],['差引支給額',f(d.netPay),1]]);
+  body+='<div class="rpt-section">④ 請求書</div>'+tbl([
+    ['発行 '+d.invCount+'件',f(d.invTotal),1]])
+    +'<div class="rpt-note">※入金状況の詳細は請求書ページで管理しています。</div>';
+  body+='<div class="rpt-section">⑤ 消費税（概算）</div>'+tbl([
+    ['仮受消費税',f(d.recvTax)],['差引納付（概算）',f(d.taxEst),1]])
+    +'<div class="rpt-note">※税抜処理・軽減税率を考慮しない簡易概算です。正確な申告額は税理士の計算によります。</div>';
+  body+='<div class="rpt-section">⑥ 損益計算書</div>'+tbl([
+    ['売上高',f(d.totalSales)],['経費+人件費',f(d.totalExp+(d.effectivePayroll!==undefined?d.effectivePayroll:d.payrollTotal))],['営業利益',f(d.grossProfit),1]]);
+  body+='<div class="rpt-section">⑦ 添付書類</div>'+tbl([['登録書類',d.docCount+'件',1]]);
+  novaReport.open({
+    title:'税理士レポート',
+    subtitle:'対象期間: '+label,
+    orientation:'portrait',
+    bodyHtml:body
+  });
 }
 
 function taxExportCSV(){
