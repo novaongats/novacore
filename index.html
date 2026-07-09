@@ -14585,6 +14585,14 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                             <input type=&quot;number&quot; class=&quot;form-input&quot; id=&quot;emp-dependents&quot; value=&quot;0&quot; min=&quot;0&quot;>
                         </div>
                         <div class=&quot;form-group&quot;>
+                            <label class=&quot;form-label&quot;>源泉徴収の税区分</label>
+                            <select class=&quot;form-select&quot; id=&quot;emp-tax-column&quot;>
+                                <option value=&quot;kou&quot;>甲欄（扶養控除等申告書 提出済み）</option>
+                                <option value=&quot;otsu&quot;>乙欄（申告書 未提出／他社が主たる給与）</option>
+                            </select>
+                            <small style=&quot;color:#64748b&quot;>※通常は甲欄。ダブルワーク先や申告書未提出の人は乙欄（税額が高くなります）</small>
+                        </div>
+                        <div class=&quot;form-group&quot;>
                             <label class=&quot;form-label&quot;>生年月日</label>
                             <input type=&quot;date&quot; class=&quot;form-input&quot; id=&quot;emp-birth-date&quot;>
                             <small style=&quot;color: #64748b;&quot;>※40/65/70/75歳到達時の保険料切替に使用</small>
@@ -15206,11 +15214,11 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                         </div>
                         <div class=&quot;form-group&quot;>
                             <label class=&quot;form-label&quot;>雇用保険料率（本人）%</label>
-                            <input type=&quot;number&quot; step=&quot;0.01&quot; class=&quot;form-input&quot; id=&quot;rate-emp&quot; value=&quot;0.6&quot;>
+                            <input type=&quot;number&quot; step=&quot;0.01&quot; class=&quot;form-input&quot; id=&quot;rate-emp&quot; value=&quot;0.55&quot;>
                         </div>
                         <div class=&quot;form-group&quot;>
                             <label class=&quot;form-label&quot;>雇用保険料率（会社）%</label>
-                            <input type=&quot;number&quot; step=&quot;0.01&quot; class=&quot;form-input&quot; id=&quot;rate-company&quot; value=&quot;0.95&quot;>
+                            <input type=&quot;number&quot; step=&quot;0.01&quot; class=&quot;form-input&quot; id=&quot;rate-company&quot; value=&quot;0.90&quot;>
                         </div>
                     </div>
                     <div class=&quot;btn-group&quot;>
@@ -16264,6 +16272,10 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                   <input type=&quot;number&quot; id=&quot;edit-care&quot; class=&quot;form-input&quot; oninput=&quot;recalcEditRecord()&quot; style=&quot;width:100%;&quot;>
                 </div>
                 <div>
+                  <label style=&quot;display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;&quot;>子育て支援金（円）</label>
+                  <input type=&quot;number&quot; id=&quot;edit-child&quot; class=&quot;form-input&quot; oninput=&quot;recalcEditRecord()&quot; style=&quot;width:100%;&quot;>
+                </div>
+                <div>
                   <label style=&quot;display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;&quot;>雇用保険（円）</label>
                   <input type=&quot;number&quot; id=&quot;edit-employment&quot; class=&quot;form-input&quot; oninput=&quot;recalcEditRecord()&quot; style=&quot;width:100%;&quot;>
                 </div>
@@ -16568,6 +16580,16 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         }
 
         /**
+         * ローカルタイムゾーン基準の 'YYYY-MM' を返す。
+         * ※ toISOString() は UTC 基準のため、日本時間の月初9時前に「前月」を返す
+         *   タイムゾーンバグがある。月キー生成は必ずこの関数を使うこと。
+         */
+        function localYM(d) {
+            d = d || new Date();
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        }
+
+        /**
          * 文字列を HTML エスケープ。innerHTML に従業員名等を埋め込む際に使用。
          */
         function escapeHtml(s) {
@@ -16666,15 +16688,15 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
          */
         function checkAgeMilestones() {
             const today = new Date();
-            const ym = today.toISOString().slice(0, 7);
+            const ym = localYM(today);
             const milestones = [40, 65, 70, 75];
             employees.filter(isActiveEmployee).forEach(emp => {
                 if (!emp.birthDate) return;
                 const ageThis  = getAgeAt(emp.birthDate, ym);
                 const ageNext  = getAgeAt(emp.birthDate,
-                    new Date(today.getFullYear(), today.getMonth() + 1, 15).toISOString().slice(0,7));
+                    localYM(new Date(today.getFullYear(), today.getMonth() + 1, 15)));
                 const ageLast  = getAgeAt(emp.birthDate,
-                    new Date(today.getFullYear(), today.getMonth() - 1, 15).toISOString().slice(0,7));
+                    localYM(new Date(today.getFullYear(), today.getMonth() - 1, 15)));
                 milestones.forEach(ms => {
                     if (ageThis === ms &amp;&amp; ageLast === ms - 1) {
                         notifications.push({
@@ -16783,20 +16805,21 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             employees.filter(isActiveEmployee).forEach(emp => {
                 if (!emp.healthCheck) return; // 健保未加入は対象外
                 // 直近3ヶ月分の給与記録
+                // ※ローカル日付で月キー生成（toISOString はUTC基準で月がズレるバグがあった）
                 const recent3 = [];
                 for (let i = 1; i <= 3; i++) {
-                    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-                    const ym = d.toISOString().slice(0, 7);
+                    const ym = localYM(new Date(today.getFullYear(), today.getMonth() - i, 15));
                     const rec = payrollRecords.find(r => r.empId === emp.id &amp;&amp; r.month === ym);
                     if (rec) recent3.push(rec);
                 }
                 if (recent3.length < 3) return;
                 const avg = Math.floor(recent3.reduce((s, r) => s + (r.grossSalary || 0), 0) / 3);
                 const newStd = getStandardRemuneration(avg);
-                // 現在の標準報酬月額（emp.healthAmount から逆算）
+                // 現在の標準報酬月額（マスタに登録済みならそれを優先、なければ健保額から逆算）
                 const pref = emp.prefecture || 'tokyo';
                 const hr = getHealthRate(pref);
-                const currentStd = hr > 0 ? Math.round((emp.healthAmount || 0) * 200 / hr) : 0;
+                const currentStd = emp.standardRemuneration ||
+                    (hr > 0 ? Math.round((emp.healthAmount || 0) * 200 / hr) : 0);
                 // 等級番号で比較
                 const currentGrade = getGradeFromStandard(currentStd) ||
                     getGradeFromStandard(stdRemunerationTable.reduce((best, row) =>
@@ -16838,13 +16861,21 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             initDefaultRates();
             initDefaultHealthRates();
             migrateHealthRatesIfStale();      // 旧年度の料率を令和8年度へ自動移行
+            migrateEmploymentRatesIfStale();  // 雇用保険料率 0.6/0.95 → 0.55/0.90 (令和8年度)
             migrateInsuranceAmountsIfNeeded(); // 既存従業員の社保額を新料率で再計算
             updateAllTables();
             updateCurrentRateDisplay();
             updateHealthRatesDisplay();
             checkAndCreateNotifications(); // 通知チェック（マイグレーション通知も含む）
+            // 税理士修正(2026-04)の一括適用カードは、適用済みなら表示しない
+            try {
+                if (localStorage.getItem('payroll_tax_advisor_fix_2026_04_v2_applied') === '1') {
+                    const c = document.getElementById('tax-advisor-fix-v2-card');
+                    if (c) c.style.display = 'none';
+                }
+            } catch(e) {}
             const today = new Date();
-            const curMonth = today.toISOString().slice(0, 7);
+            const curMonth = localYM(today);
             document.getElementById('calc-month').value = curMonth;
             document.getElementById('bulk-calc-month').value = curMonth;
             document.getElementById('bonus-month').value = curMonth;
@@ -16991,6 +17022,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 email: (document.getElementById('emp-email').value || '').trim() || null,
                 type: type,
                 dependents: parseInt(document.getElementById('emp-dependents').value) || 0,
+                taxColumn: document.getElementById('emp-tax-column')?.value || 'kou', // 甲欄/乙欄
                 prefecture: document.getElementById('emp-prefecture').value || 'tokyo',
                 healthCheck: document.getElementById('emp-health-check').checked,
                 pensionCheck: document.getElementById('emp-pension-check').checked,
@@ -17123,6 +17155,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             var emEm2 = document.getElementById('emp-email'); if(emEm2) emEm2.value = emp.email || '';
             document.getElementById('emp-type').value = emp.type;
             document.getElementById('emp-dependents').value = emp.dependents;
+            const txEl = document.getElementById('emp-tax-column'); if (txEl) txEl.value = emp.taxColumn || 'kou';
             document.getElementById('emp-prefecture').value = emp.prefecture || 'tokyo';
             const stdEl = document.getElementById('emp-std-remuneration'); if (stdEl) stdEl.value = emp.standardRemuneration || 0;
             document.getElementById('emp-health-amount').value = emp.healthAmount;
@@ -17229,12 +17262,16 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
                 const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
                 const employment = 0; // 役員は雇用保険なし
+                // 手動上書き（税理士指示）を尊重: 健保・所得税は既存レコードの上書きフラグがあればその値を使う
+                const finalHealth = (existing &amp;&amp; existing.healthOverride) ? existing.health : health;
                 // 所得税は「社会保険料控除後の額」で計算（月額表 甲欄の仕様）
                 const taxableForIncomeTax = Math.max(0,
-                    grossSalary - health - pension - care - childSupport - employment);
-                const incomeTax = calculateIncomeTax(taxableForIncomeTax, emp.dependents);
+                    grossSalary - finalHealth - pension - care - childSupport - employment);
+                const incomeTax = (existing &amp;&amp; existing.incomeTaxOverride)
+                    ? existing.incomeTax
+                    : calculateIncomeTax(taxableForIncomeTax, emp.dependents);
                 const residentTax = emp.residentTax || 0;
-                const totalDed = health + pension + care + childSupport + employment + incomeTax + residentTax;
+                const totalDed = finalHealth + pension + care + childSupport + employment + incomeTax + residentTax;
                 const netSalary = grossSalary - totalDed;
 
                 const calculation = {
@@ -17247,7 +17284,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     allowance,
                     deduction,
                     grossSalary,
-                    health,
+                    health: finalHealth,
                     pension,
                     care,
                     childSupport,
@@ -17257,8 +17294,9 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                     totalDed,
                     netSalary
                 };
-                
+
                 if (existing) {
+                    // Object.assign なのでフラグ (incomeTaxOverride/healthOverride) は自動的に保持される
                     Object.assign(existing, calculation);
                     updatedCount++;
                 } else {
@@ -17479,7 +17517,12 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             if (!currentCalculation) return;
             const idx = payrollRecords.findIndex(r => r.month === currentCalculation.month &amp;&amp; r.empId === currentCalculation.empId);
             if (idx >= 0) {
-                if (confirm('既に存在します。上書きしますか?')) payrollRecords[idx] = {...currentCalculation};
+                const prev = payrollRecords[idx];
+                // 手動上書き（税理士指示の所得税・健保）があるレコードは警告を強める
+                const warn = prev.incomeTaxOverride
+                    ? '既に存在します。\n\n⚠️ このレコードには手動設定された所得税（' + formatCurrency(prev.incomeTax) + '・' + (prev.incomeTaxOverrideNote || '税理士指示') + '）があります。\n上書きすると自動計算値に置き換わります。\n\n本当に上書きしますか?'
+                    : '既に存在します。上書きしますか?';
+                if (confirm(warn)) payrollRecords[idx] = {...currentCalculation};
                 else return;
             } else {
                 payrollRecords.push({...currentCalculation});
@@ -17538,7 +17581,13 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
             const prevMonth = getPrevMonth(month);
             const prevRec = payrollRecords.find(r => r.empId === empId &amp;&amp; r.month === prevMonth);
-            const prevSalary = prevRec ? prevRec.grossSalary : (emp.monthlySalary || 200000);
+            // 賞与税額表の基準は「前月の社会保険料等控除後の給与等の金額」（総支給ではない）。
+            // taxableGross（社保控除後）を優先し、旧レコードは総支給から社保を差し引いて算出。
+            const prevSalary = prevRec
+                ? (prevRec.taxableGross != null
+                    ? prevRec.taxableGross
+                    : Math.max(0, (prevRec.grossSalary || 0) - (prevRec.health || 0) - (prevRec.pension || 0) - (prevRec.care || 0) - (prevRec.childSupport || 0) - (prevRec.employment || 0)))
+                : (emp.monthlySalary || 200000);
             const bonusTaxRate = getBonusTaxRate(prevSalary, emp.dependents);
             const incomeTax = Math.floor(
                 (bonusAmt - health - pension - care - childSupport - employment) * bonusTaxRate);
@@ -18001,6 +18050,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             document.getElementById('edit-health').value      = rec.health      || 0;
             document.getElementById('edit-pension').value     = rec.pension     || 0;
             document.getElementById('edit-care').value        = rec.care        || 0;
+            document.getElementById('edit-child').value       = rec.childSupport || 0;
             document.getElementById('edit-employment').value  = rec.employment  || 0;
             document.getElementById('edit-incomeTax').value   = rec.incomeTax   || 0;
             document.getElementById('edit-residentTax').value = rec.residentTax || 0;
@@ -18016,7 +18066,8 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
         function recalcEditRecord() {
             const v = id => parseInt(document.getElementById(id).value) || 0;
             const grossSalary = v('edit-basePay') + v('edit-commission') + v('edit-allowance') - v('edit-deduction');
-            const totalDed    = v('edit-health') + v('edit-pension') + v('edit-care') + v('edit-employment') + v('edit-incomeTax') + v('edit-residentTax');
+            // ※子育て支援金(edit-child)を含む全控除の合計（旧版は支援金が抜けて差引が過大だった）
+            const totalDed    = v('edit-health') + v('edit-pension') + v('edit-care') + v('edit-child') + v('edit-employment') + v('edit-incomeTax') + v('edit-residentTax');
             const netSalary   = grossSalary - totalDed;
             document.getElementById('edit-gross-disp').textContent    = formatCurrency(grossSalary);
             document.getElementById('edit-totalDed-disp').textContent = formatCurrency(totalDed);
@@ -18030,6 +18081,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             if (idx < 0) { alert('保存対象が見つかりません'); return; }
 
             const v = id => parseInt(document.getElementById(id).value) || 0;
+            const prev        = payrollRecords[idx];
             const basePay     = v('edit-basePay');
             const commission  = v('edit-commission');
             const allowance   = v('edit-allowance');
@@ -18038,17 +18090,27 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             const health      = v('edit-health');
             const pension     = v('edit-pension');
             const care        = v('edit-care');
+            const childSupport= v('edit-child');
             const employment  = v('edit-employment');
             const incomeTax   = v('edit-incomeTax');
             const residentTax = v('edit-residentTax');
-            const totalDed    = health + pension + care + employment + incomeTax + residentTax;
+            const totalDed    = health + pension + care + childSupport + employment + incomeTax + residentTax;
             const netSalary   = grossSalary - totalDed;
 
             payrollRecords[idx] = {
                 ...payrollRecords[idx],
                 basePay, commission, allowance, deduction, grossSalary,
-                health, pension, care, employment, incomeTax, residentTax, totalDed, netSalary
+                health, pension, care, childSupport, employment, incomeTax, residentTax, totalDed, netSalary
             };
+            // 手動で所得税・健保を変更した場合は上書きフラグを立て、
+            // 以降の「全員再計算」で自動計算値に戻されないようにする（税理士指示の値を保護）
+            if (incomeTax !== (prev.incomeTax || 0)) {
+                payrollRecords[idx].incomeTaxOverride = true;
+                payrollRecords[idx].incomeTaxOverrideNote = '編集モーダルで手動設定';
+            }
+            if (health !== (prev.health || 0)) {
+                payrollRecords[idx].healthOverride = true;
+            }
             saveData();
             closeEditRecordModal();
             filterPayrollList();
@@ -18597,8 +18659,13 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             if (!confirm('従業員マスタに反映しますか?')) return;
             let cnt = 0;
             assessmentData.forEach(d => {
+                if (d.skipped) return;
                 const emp = employees.find(e => e.id === d.empId);
                 if (emp) {
+                    // 標準報酬月額もマスタに保存する。
+                    // ※旧実装は保険料額のみ更新し標報を放置していたため、月額変更届の検出や
+                    //   診断・社保再計算が古い標報を参照して狂うバグがあった
+                    if (d.std) emp.standardRemuneration = d.std;
                     emp.healthAmount = d.health;
                     emp.pensionAmount = d.pension;
                     emp.careAmount = d.care;
@@ -18608,7 +18675,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             });
             saveData('employees');
             updateAllTables();
-            alert(`${cnt}名の従業員マスタを更新しました`);
+            alert(`${cnt}名の従業員マスタを更新しました（標準報酬月額・健保・年金・介護・支援金）`);
         }
 
         function printAssessment() {
@@ -18971,11 +19038,41 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
             URL.revokeObjectURL(url);
             alert(`給与支払報告書を出力しました\n対象: ${targets.length}名 (${year}年分)\n\n市区町村への提出に使用してください（提出期限: 翌年1月31日）`);
         }
+        // 令和8年度 雇用保険料率 (一般の事業): 本人 0.55% / 会社 0.90%
+        // ※令和7年度から据え置き。令和6年度は 0.6/0.95 だった
+        const EMPLOYMENT_RATE_FY2026 = { employee: 0.55, company: 0.90 };
+
         function initDefaultRates() {
             if (insuranceRates.length === 0) {
                 const today = new Date();
-                insuranceRates.push({ effectiveDate: today.toISOString().slice(0,7), employmentEmployee: 0.6, employmentCompany: 0.95 });
+                insuranceRates.push({ effectiveDate: localYM(today), employmentEmployee: EMPLOYMENT_RATE_FY2026.employee, employmentCompany: EMPLOYMENT_RATE_FY2026.company });
                 saveData();
+            }
+        }
+
+        /**
+         * 雇用保険料率の自動マイグレーション。
+         * 旧年度の初期値 (0.6/0.95) がそのまま残っている場合、令和8年度の値に更新。
+         * 手動カスタム値の場合は触らない。
+         */
+        function migrateEmploymentRatesIfStale() {
+            let changed = false;
+            insuranceRates.forEach(r => {
+                if (r && Math.abs(r.employmentEmployee - 0.6) < 0.001 && Math.abs(r.employmentCompany - 0.95) < 0.001) {
+                    r.employmentEmployee = EMPLOYMENT_RATE_FY2026.employee;
+                    r.employmentCompany = EMPLOYMENT_RATE_FY2026.company;
+                    changed = true;
+                }
+            });
+            if (changed) {
+                saveData('rates');
+                notifications.push({
+                    type: 'info',
+                    icon: '✅',
+                    title: '雇用保険料率を令和8年度に自動更新',
+                    message: `本人 ${EMPLOYMENT_RATE_FY2026.employee}% / 会社 ${EMPLOYMENT_RATE_FY2026.company}% に更新しました（旧: 0.6%/0.95% は令和6年度の料率）。給与一覧の「♻ 対象月の給与を全員再計算」で既存レコードにも反映できます。`,
+                    action: () => switchTab('rates'),
+                });
             }
         }
 
@@ -19417,7 +19514,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
                 const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
                 const employment   = (ins.employment &amp;&amp; emp.type !== 'executive')
-                    ? Math.floor(grossSalary * (rates ? rates.employmentEmployee : 0.6) / 100) : 0;
+                    ? Math.floor(grossSalary * (rates ? rates.employmentEmployee : EMPLOYMENT_RATE_FY2026.employee) / 100) : 0;
 
                 Object.assign(rec, {
                     empName: emp.name,
@@ -19587,7 +19684,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
                 const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
                 const employment   = (ins.employment &amp;&amp; emp.type !== 'executive')
-                    ? Math.floor(grossSalary * (rates ? rates.employmentEmployee : 0.6) / 100) : 0;
+                    ? Math.floor(grossSalary * (rates ? rates.employmentEmployee : EMPLOYMENT_RATE_FY2026.employee) / 100) : 0;
                 const taxableForIncomeTax = Math.max(0,
                     grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
                 const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
@@ -19667,7 +19764,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
          *            commuteTotal,commuteNonTaxable,taxableForIncomeTax,onLeave,age,notes}}
          */
         function computeCanonical(emp, month, existingRec) {
-            const rates = getCurrentRates(month) || { employmentEmployee: 0.6 };
+            const rates = getCurrentRates(month) || { employmentEmployee: EMPLOYMENT_RATE_FY2026.employee };
             const ins = getInsuranceStatusAtMonth(emp, month);
             const onLeave = isOnLeave(emp);
 
@@ -19689,7 +19786,10 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
             const grossSalary = basePay + commission + allowance + commuteTotal - deduction;
 
-            const health       = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+            // 手動上書き（税理士指示の乙欄税額など）があるレコードは、上書き値を「正規値」として扱う。
+            // これをしないと診断が永遠に「不整合」と赤表示し、操作者が壊れていると誤解する。
+            const autoHealth   = (!onLeave &amp;&amp; ins.health)       ? (emp.healthAmount || 0) : 0;
+            const health       = (existingRec &amp;&amp; existingRec.healthOverride) ? (existingRec.health || 0) : autoHealth;
             const pension      = (!onLeave &amp;&amp; ins.pension)      ? (emp.pensionAmount || 0) : 0;
             const care         = (!onLeave &amp;&amp; ins.care)         ? (emp.careAmount || 0) : 0;
             const childSupport = (!onLeave &amp;&amp; ins.childSupport) ? (emp.childSupportAmount || 0) : 0;
@@ -19697,7 +19797,9 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 ? Math.floor(grossSalary * rates.employmentEmployee / 100) : 0;
             const taxableForIncomeTax = Math.max(0,
                 grossSalary - commuteNonTaxable - health - pension - care - childSupport - employment);
-            const incomeTax    = calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
+            const incomeTax    = (existingRec &amp;&amp; existingRec.incomeTaxOverride)
+                ? (existingRec.incomeTax || 0)
+                : calculateIncomeTax(taxableForIncomeTax, emp.dependents || 0);
             const residentTax  = emp.residentTax || 0;
             const totalDed     = health + pension + care + childSupport + employment + incomeTax + residentTax;
             const netSalary    = grossSalary - totalDed;
@@ -19708,6 +19810,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
                 commuteTotal, commuteNonTaxable, taxableForIncomeTax,
                 onLeave, age: ins.age, notes: ins.notes,
                 basePay, commission, allowance, deduction,
+                hasOverride: !!(existingRec &amp;&amp; (existingRec.incomeTaxOverride || existingRec.healthOverride)),
             };
         }
 
@@ -20074,7 +20177,7 @@ input,select,textarea{background:var(--nc-card)!important;color:var(--nc-text)!i
 
         function updateCurrentRateDisplay() {
             const today = new Date();
-            const rate = getCurrentRates(today.toISOString().slice(0,7));
+            const rate = getCurrentRates(localYM(today));
             const disp = document.getElementById('current-rate-display');
             if (rate) {
                 disp.innerHTML = `<strong>適用年月:</strong> ${rate.effectiveDate}から<br><strong>本人負担:</strong> ${rate.employmentEmployee}% | <strong>会社負担:</strong> ${rate.employmentCompany}%`;
