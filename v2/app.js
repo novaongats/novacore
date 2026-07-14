@@ -14,7 +14,7 @@ import { CashbookPage } from './pages/cashbook/index.js';
 import { InvoicesPage } from './pages/invoices/index.js';
 import { DocumentsPage } from './pages/documents/index.js';
 import { PayrollPage } from './pages/payroll/index.js';
-import { TaxReportPage } from './pages/tax-report.js';
+import { TaxReportPage } from './pages/tax/index.js';
 import { HomePage } from './pages/home.js';
 
 const html = htm.bind(h);
@@ -30,7 +30,7 @@ const NAV = [
   { group: '書類' },
   { id: 'invoices',  label: '請求・領収書', icon: '▢' },
   { id: 'docs',      label: '書類管理',     icon: '▤' },
-  { id: 'tax',       label: '税理士レポート', icon: '▧' },
+  { id: 'tax',       label: '税理士提出書類', icon: '▧' },
   { group: '設定' },
   { id: 'settings',  label: '設定',         icon: '⚙' },
 ];

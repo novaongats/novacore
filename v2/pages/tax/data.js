@@ -1,0 +1,726 @@
+/* ============================================================
+   NOVA Core v2 — 税理士提出書類 / データビルダー
+
+   各ビルダーは「書類スペック」を返す:
+     {
+       id, title, period, scope,
+       sections: [{ heading?, note?, table?: { cols, rows, total? } }],
+       footnotes: [string],
+     }
+   cols: [{ label, align?: 'right'|'center', width? }]
+   rows: string|number の二次元配列（number は ¥ フォーマットで描画）
+
+   このスペックを print.js（A4描画）と csv 変換の両方が消費する。
+   ============================================================ */
+
+import {
+  formatYen, monthLabel, asArray, sumBy, lastNMonths, deptLabel, accountLabel,
+} from '../../shared.js';
+import { getRatesFor, getInsuranceStatus, isOnLeave } from '../payroll/calc.js';
+import { EMP_TYPE_MAP } from '../payroll/constants.js';
+import { STATUS_MAP, DOC_TYPE_MAP } from '../invoices/calc.js';
+
+// ---- 共通ヘルパー ------------------------------------------------------------
+
+const yen = n => formatYen(n || 0);
+
+/** scope: 'all' | dept key。エントリの所属部門キーを解決 */
+function entryDept(e, catMap) {
+  return catMap.get(e.catId)?.dept || e.dept || 'other';
+}
+
+function scopeLabel(scope, depts) {
+  if (scope === 'all') return '全社（本部総合）';
+  return (depts.find(d => d.key === scope)?.label || scope) + '（部門別）';
+}
+
+/** cashbook エントリが部門スコープに属するか（dept 文字列は部門ラベルと突合） */
+function cashbookInScope(e, scope, depts) {
+  if (scope === 'all') return true;
+  const label = depts.find(d => d.key === scope)?.label;
+  return !!label && (e.dept === label || e.dept === scope);
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  return String(d).replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, (_, y, m, dd) =>
+    `${m}/${dd}`);
+}
+
+/** レベシェアの自動外注費: カテゴリ×月売上から算出 */
+function revShareRows(entries, cats, scope, catMap) {
+  const rows = [];
+  for (const cat of cats) {
+    if (!cat.revShare?.enabled) continue;
+    if (scope !== 'all' && (cat.dept || 'other') !== scope) continue;
+    const pct = Math.max(0, Math.min(100, Number(cat.revShare.companyPct) || 0));
+    const rev = entries
+      .filter(e => e.catId === cat.id)
+      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const outsource = Math.round(rev * (100 - pct) / 100);
+    if (outsource > 0) rows.push({ cat, outsource, pct });
+  }
+  return rows;
+}
+
+// ============================================================
+// 1. 月次損益サマリー（部門別 P/L）
+// ============================================================
+
+export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, payroll, bonus, rates }) {
+  const catMap = new Map(cats.map(c => [c.id, c]));
+  const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
+
+  // --- 売上（部門別） ---
+  const revByDept = {};
+  let totalRevenue = 0;
+  for (const e of entries) {
+    if (!inScope(e)) continue;
+    const d = entryDept(e, catMap);
+    const v = Number(e.amount) || 0;
+    revByDept[d] = (revByDept[d] || 0) + v;
+    totalRevenue += v;
+  }
+
+  // --- 経費（勘定科目別） ---
+  const costByAccount = {};
+  const add = (label, v) => { if (v) costByAccount[label] = (costByAccount[label] || 0) + v; };
+
+  for (const sc of costs) {
+    const cat = catMap.get(sc.catId);
+    if (scope !== 'all' && (cat?.dept || 'other') !== scope) continue;
+    for (const it of asArray(sc.items)) add(accountLabel(it.type), Number(it.amount) || 0);
+  }
+  for (const r of revShareRows(entries, cats, scope, catMap)) add('外注費', r.outsource);
+  for (const e of cashbook) {
+    if (!cashbookInScope(e, scope, depts)) continue;
+    add(e.category || 'その他（現金）', Number(e.amount) || 0);
+  }
+
+  // --- 人件費（全社スコープのみ。部門配賦は行っていない） ---
+  let payrollGross = 0, employerSocial = 0;
+  if (scope === 'all') {
+    payrollGross = sumBy(payroll, r => r.gross) + sumBy(bonus, r => r.amount);
+    employerSocial = estimateEmployerSocial(payroll, bonus, rates);
+    add('給料・賞与（額面）', payrollGross);
+    add('法定福利費（事業主負担・概算）', employerSocial);
+  }
+
+  const totalCost = Object.values(costByAccount).reduce((s, v) => s + v, 0);
+  const profit = totalRevenue - totalCost;
+
+  const revRows = depts
+    .filter(d => revByDept[d.key])
+    .map(d => [d.label, yen(revByDept[d.key]),
+               totalRevenue ? Math.round(revByDept[d.key] / totalRevenue * 100) + '%' : '-']);
+  // 未登録部門キーの拾い漏れ防止
+  for (const k of Object.keys(revByDept)) {
+    if (!depts.some(d => d.key === k)) {
+      revRows.push([deptLabel(k), yen(revByDept[k]),
+                    totalRevenue ? Math.round(revByDept[k] / totalRevenue * 100) + '%' : '-']);
+    }
+  }
+
+  const costRows = Object.entries(costByAccount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, v]) => [label, yen(v), totalCost ? Math.round(v / totalCost * 100) + '%' : '-']);
+
+  return {
+    id: 'pl',
+    title: '月次損益サマリー',
+    period: monthLabel(month),
+    scope: scopeLabel(scope, depts),
+    sections: [
+      {
+        heading: '① 売上高（部門別）',
+        table: {
+          cols: [{ label: '部門' }, { label: '金額', align: 'right' }, { label: '構成比', align: 'right' }],
+          rows: revRows.length ? revRows : [['（売上なし）', '-', '-']],
+          total: ['売上高 合計', yen(totalRevenue), '100%'],
+        },
+      },
+      {
+        heading: '② 経費（勘定科目別）',
+        table: {
+          cols: [{ label: '勘定科目' }, { label: '金額', align: 'right' }, { label: '構成比', align: 'right' }],
+          rows: costRows.length ? costRows : [['（経費なし）', '-', '-']],
+          total: ['経費 合計', yen(totalCost), '100%'],
+        },
+      },
+      {
+        heading: '③ 損益',
+        table: {
+          cols: [{ label: '項目' }, { label: '金額', align: 'right' }],
+          rows: [
+            ['売上高', yen(totalRevenue)],
+            ['経費合計', '△ ' + yen(totalCost).replace('¥', '¥')],
+          ],
+          total: ['営業利益', yen(profit)],
+        },
+      },
+    ],
+    footnotes: [
+      scope === 'all'
+        ? '人件費（給料・賞与、法定福利費）は全社一括計上（部門配賦なし）。法定福利費は事業主負担の概算値。'
+        : '部門別表示では人件費（給料・賞与）を含みません（全社集計でのみ計上）。',
+      '経費は「月次コスト（事業別）」「現金出納帳」「レベニューシェア外注費（自動計算）」の合算。',
+      '金額はすべて税込。',
+    ],
+  };
+}
+
+/** 事業主負担の社会保険料（概算）: 健保・介護・厚年・支援金は本人と同額、雇用保険は事業主率 */
+function estimateEmployerSocial(payroll, bonus, rates) {
+  let total = 0;
+  const employerEmpRate = (rates?.employmentEmployer ?? 0.9) / 100;
+  for (const r of payroll) {
+    total += (r.health || 0) + (r.care || 0) + (r.pension || 0) + (r.childSupport || 0);
+    total += Math.round((r.gross || 0) * employerEmpRate);
+  }
+  for (const b of bonus) {
+    total += (b.health || 0) + (b.care || 0) + (b.pension || 0) + (b.childSupport || 0);
+    total += Math.round((b.amount || 0) * employerEmpRate);
+  }
+  return total;
+}
+
+// ============================================================
+// 2. 売上帳（日別明細）
+// ============================================================
+
+export function buildSalesLedger({ month, scope, depts, cats, entries }) {
+  const catMap = new Map(cats.map(c => [c.id, c]));
+  const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
+
+  const list = entries
+    .filter(inScope)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  const rows = list.map(e => {
+    const cat = catMap.get(e.catId);
+    return [
+      fmtDate(e.date),
+      deptLabel(entryDept(e, catMap)),
+      cat?.name || (e.source?.includes('manual') ? '（手入力）' : '（不明カテゴリ）'),
+      e.memo || '',
+      yen(e.amount),
+    ];
+  });
+  const total = sumBy(list, e => e.amount);
+
+  return {
+    id: 'sales-ledger',
+    title: '売上帳（日別明細）',
+    period: monthLabel(month),
+    scope: scopeLabel(scope, depts),
+    sections: [{
+      table: {
+        cols: [
+          { label: '日付', width: 56 }, { label: '部門', width: 110 },
+          { label: 'カテゴリ' }, { label: '摘要' },
+          { label: '金額', align: 'right', width: 110 },
+        ],
+        rows: rows.length ? rows : [['', '', '（該当月の売上はありません）', '', '-']],
+        total: ['', '', '', `合計（${list.length}件）`, yen(total)],
+      },
+    }],
+    footnotes: ['金額は税込。売上入力（日次売上）の登録データに基づく。'],
+  };
+}
+
+// ============================================================
+// 3. 経費帳（勘定科目別明細）
+// ============================================================
+
+export function buildExpenseLedger({ month, scope, depts, cats, entries, costs, cashbook }) {
+  const catMap = new Map(cats.map(c => [c.id, c]));
+
+  // 科目 → 明細行
+  const groups = new Map();
+  const push = (account, row, amount) => {
+    if (!groups.has(account)) groups.set(account, { rows: [], total: 0 });
+    const g = groups.get(account);
+    g.rows.push(row);
+    g.total += amount;
+  };
+
+  for (const sc of costs) {
+    const cat = catMap.get(sc.catId);
+    if (scope !== 'all' && (cat?.dept || 'other') !== scope) continue;
+    for (const it of asArray(sc.items)) {
+      const v = Number(it.amount) || 0;
+      if (!v) continue;
+      push(accountLabel(it.type),
+           ['月次コスト', deptLabel(cat?.dept || 'other'), cat?.name || '（不明）', it.memo || it.note || '', yen(v)],
+           v);
+    }
+  }
+  for (const r of revShareRows(entries, cats, scope, catMap)) {
+    push('外注費',
+         ['自動計算', deptLabel(r.cat.dept || 'other'), r.cat.name,
+          `レベニューシェア（弊社${r.pct}%）`, yen(r.outsource)],
+         r.outsource);
+  }
+  for (const e of cashbook) {
+    if (!cashbookInScope(e, scope, depts)) continue;
+    const v = Number(e.amount) || 0;
+    if (!v) continue;
+    push(e.category || 'その他（現金）',
+         ['現金出納帳', e.dept || '-', e.vendor || '', e.memo || '', yen(v)],
+         v);
+  }
+
+  const sections = [...groups.entries()]
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([account, g]) => ({
+      heading: `${account}`,
+      table: {
+        cols: [
+          { label: '出所', width: 76 }, { label: '部門/店舗', width: 100 },
+          { label: '取引先・カテゴリ' }, { label: '摘要' },
+          { label: '金額', align: 'right', width: 100 },
+        ],
+        rows: g.rows,
+        total: ['', '', '', `${account} 計（${g.rows.length}件）`, yen(g.total)],
+      },
+    }));
+
+  const grandTotal = [...groups.values()].reduce((s, g) => s + g.total, 0);
+
+  return {
+    id: 'expense-ledger',
+    title: '経費帳（勘定科目別）',
+    period: monthLabel(month),
+    scope: scopeLabel(scope, depts),
+    sections: sections.length ? sections : [{
+      table: { cols: [{ label: '' }], rows: [['（該当月の経費はありません）']] },
+    }],
+    grandTotal: { label: '経費 総合計', value: yen(grandTotal) },
+    footnotes: [
+      '金額は税込。「月次コスト」「現金出納帳」「レベニューシェア外注費」の合算。',
+      scope !== 'all' ? '現金出納帳の明細は、部門名が一致するもののみ表示しています。' : null,
+    ].filter(Boolean),
+  };
+}
+
+// ============================================================
+// 4. 現金出納帳（月次）
+// ============================================================
+
+export function buildCashbookDoc({ month, scope, depts, cashbook }) {
+  const list = cashbook
+    .filter(e => cashbookInScope(e, scope, depts))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  const rows = list.map(e => [
+    fmtDate(e.date),
+    e.vendor || '',
+    e.category || '',
+    e.dept || '',
+    e.reducedTax ? '8%（軽減）' : '10%',
+    e.hasInvoice ? (e.invoiceNumber ? `有 ${e.invoiceNumber}` : '有') : '無',
+    yen(e.amount),
+  ]);
+
+  const total = sumBy(list, e => e.amount);
+  const t10 = sumBy(list.filter(e => !e.reducedTax), e => e.amount);
+  const t8  = sumBy(list.filter(e => e.reducedTax), e => e.amount);
+  const inv = sumBy(list.filter(e => e.hasInvoice), e => e.amount);
+
+  return {
+    id: 'cashbook',
+    title: '現金出納帳',
+    period: monthLabel(month),
+    scope: scopeLabel(scope, depts),
+    sections: [
+      {
+        table: {
+          cols: [
+            { label: '日付', width: 52 }, { label: '相手先' }, { label: '科目', width: 90 },
+            { label: '部門/店舗', width: 84 }, { label: '税率', width: 66 },
+            { label: 'ｲﾝﾎﾞｲｽ', width: 70 }, { label: '支出額', align: 'right', width: 96 },
+          ],
+          rows: rows.length ? rows : [['', '（該当月の記帳はありません）', '', '', '', '', '-']],
+          total: ['', '', '', '', '', `合計（${list.length}件）`, yen(total)],
+        },
+      },
+      {
+        heading: '税区分別 内訳',
+        table: {
+          cols: [{ label: '区分' }, { label: '金額', align: 'right' }],
+          rows: [
+            ['標準税率 10% 対象', yen(t10)],
+            ['軽減税率 8% 対象', yen(t8)],
+            ['適格請求書（インボイス）あり', yen(inv)],
+            ['適格請求書なし', yen(total - inv)],
+          ],
+        },
+      },
+    ],
+    footnotes: ['金額は税込。「インボイスあり」は適格請求書発行事業者の登録番号が確認できた支出。'],
+  };
+}
+
+// ============================================================
+// 5. 消費税区分集計表
+// ============================================================
+
+export function buildTaxSummary({ month, scope, depts, cats, entries, costs, cashbook, invoices }) {
+  const catMap = new Map(cats.map(c => [c.id, c]));
+  const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
+
+  // 売上側（税込→内税を概算）
+  const sales = sumBy(entries.filter(inScope), e => e.amount);
+  const recvTax = Math.round(sales * 10 / 110);
+
+  // 請求書ベース（発行済・入金済のみ、参考値）
+  const issued = invoices.filter(i =>
+    i.type === 'invoice' && (i.status === 'issued' || i.status === 'paid'));
+  const invTax10 = sumBy(issued, i => i.tax10);
+  const invTax8  = sumBy(issued, i => i.tax8);
+
+  // 仕入側
+  let cost10 = 0, cost8 = 0, costInv10 = 0, costInv8 = 0;
+  for (const e of cashbook) {
+    if (!cashbookInScope(e, scope, depts)) continue;
+    const v = Number(e.amount) || 0;
+    if (e.reducedTax) { cost8 += v; if (e.hasInvoice) costInv8 += v; }
+    else              { cost10 += v; if (e.hasInvoice) costInv10 += v; }
+  }
+  let scCost = 0;
+  for (const sc of costs) {
+    const cat = catMap.get(sc.catId);
+    if (scope !== 'all' && (cat?.dept || 'other') !== scope) continue;
+    scCost += sumBy(asArray(sc.items), i => i.amount);
+  }
+
+  const paid10 = Math.round(cost10 * 10 / 110);
+  const paid8  = Math.round(cost8 * 8 / 108);
+  const paidSc = Math.round(scCost * 10 / 110);
+  const paidTotal = paid10 + paid8 + paidSc;
+  const payable = Math.max(0, recvTax - paidTotal);
+
+  return {
+    id: 'tax-summary',
+    title: '消費税区分集計表（概算）',
+    period: monthLabel(month),
+    scope: scopeLabel(scope, depts),
+    sections: [
+      {
+        heading: '① 売上に係る消費税（仮受・概算）',
+        table: {
+          cols: [{ label: '区分' }, { label: '税込金額', align: 'right' }, { label: '消費税額（概算）', align: 'right' }],
+          rows: [
+            ['課税売上（標準10%・内税換算）', yen(sales), yen(recvTax)],
+          ],
+          total: ['仮受消費税 合計', '', yen(recvTax)],
+        },
+        note: issued.length
+          ? `（参考）発行済請求書ベース: 10%消費税 ${yen(invTax10)} / 軽減8%消費税 ${yen(invTax8)}（${issued.length}件）`
+          : null,
+      },
+      {
+        heading: '② 仕入・経費に係る消費税（仮払・概算）',
+        table: {
+          cols: [{ label: '区分' }, { label: '税込金額', align: 'right' }, { label: '消費税額（概算）', align: 'right' }],
+          rows: [
+            ['現金出納帳: 標準10%', yen(cost10), yen(paid10)],
+            ['　うち 適格請求書あり', yen(costInv10), ''],
+            ['現金出納帳: 軽減8%', yen(cost8), yen(paid8)],
+            ['　うち 適格請求書あり', yen(costInv8), ''],
+            ['月次コスト（標準10%とみなし）', yen(scCost), yen(paidSc)],
+          ],
+          total: ['仮払消費税 合計', '', yen(paidTotal)],
+        },
+      },
+      {
+        heading: '③ 差引（概算）',
+        table: {
+          cols: [{ label: '項目' }, { label: '金額', align: 'right' }],
+          rows: [
+            ['仮受消費税', yen(recvTax)],
+            ['仮払消費税', '△ ' + yen(paidTotal)],
+          ],
+          total: ['差引 納付見込（概算）', yen(payable)],
+        },
+      },
+    ],
+    footnotes: [
+      '本表は帳簿データからの概算であり、申告額の確定計算ではありません（税理士確認用の参考資料）。',
+      '売上・月次コストは標準税率10%の内税として換算。非課税・不課税取引は区分していません。',
+      '仕入税額控除の適用可否（インボイス制度・経過措置）は「適格請求書あり」の区分を参照してください。',
+    ],
+  };
+}
+
+// ============================================================
+// 6. 賃金台帳 + 源泉徴収税 納付集計
+// ============================================================
+
+export function buildWageLedger({ month, depts, payroll, bonus, employees, rates }) {
+  const sorted = [...payroll].sort((a, b) => (a.empName || '').localeCompare(b.empName || '', 'ja'));
+
+  const rows = sorted.map(r => [
+    r.empName || r.empId,
+    EMP_TYPE_MAP[r.empType]?.label || r.empType || '',
+    yen(r.basePay), yen((r.commission || 0) + (r.allowance || 0)),
+    yen(r.commuteTotal), yen(r.gross),
+    yen((r.health || 0) + (r.care || 0)), yen(r.pension),
+    yen((r.childSupport || 0)), yen(r.employment),
+    yen(r.incomeTax), yen(r.residentTax), yen(r.net),
+  ]);
+
+  const t = f => sumBy(payroll, f);
+  const total = [
+    `合計（${payroll.length}名）`, '',
+    yen(t(r => r.basePay)), yen(t(r => (r.commission || 0) + (r.allowance || 0))),
+    yen(t(r => r.commuteTotal)), yen(t(r => r.gross)),
+    yen(t(r => (r.health || 0) + (r.care || 0))), yen(t(r => r.pension)),
+    yen(t(r => r.childSupport)), yen(t(r => r.employment)),
+    yen(t(r => r.incomeTax)), yen(t(r => r.residentTax)), yen(t(r => r.net)),
+  ];
+
+  // 賞与
+  const bonusRows = bonus.map(b => [
+    b.empName || b.empId, yen(b.amount), yen(b.social), yen(b.incomeTax), yen(b.net),
+  ]);
+
+  // 源泉税納付集計（納付書転記用）
+  const incomeTaxTotal = t(r => r.incomeTax) + sumBy(bonus, b => b.incomeTax);
+  const residentTotal = t(r => r.residentTax);
+  const grossTotal = t(r => r.gross);
+  const bonusTotal = sumBy(bonus, b => b.amount);
+
+  const sections = [
+    {
+      heading: '① 給与支給明細（賃金台帳）',
+      table: {
+        cols: [
+          { label: '氏名' }, { label: '区分', width: 58 },
+          { label: '基本給', align: 'right' }, { label: '諸手当', align: 'right' },
+          { label: '通勤手当', align: 'right' }, { label: '総支給', align: 'right' },
+          { label: '健保+介護', align: 'right' }, { label: '厚生年金', align: 'right' },
+          { label: '支援金', align: 'right' }, { label: '雇用保険', align: 'right' },
+          { label: '所得税', align: 'right' }, { label: '住民税', align: 'right' },
+          { label: '差引支給', align: 'right' },
+        ],
+        rows: rows.length ? rows : [['（該当月の給与計算がありません）', '', '', '', '', '', '', '', '', '', '', '', '']],
+        total: rows.length ? total : null,
+        small: true,
+      },
+    },
+  ];
+
+  if (bonusRows.length) {
+    sections.push({
+      heading: '② 賞与支給明細',
+      table: {
+        cols: [
+          { label: '氏名' }, { label: '賞与額', align: 'right' },
+          { label: '社会保険料', align: 'right' }, { label: '所得税', align: 'right' },
+          { label: '差引支給', align: 'right' },
+        ],
+        rows: bonusRows,
+        total: [`合計（${bonusRows.length}名）`, yen(bonusTotal),
+                yen(sumBy(bonus, b => b.social)), yen(sumBy(bonus, b => b.incomeTax)),
+                yen(sumBy(bonus, b => b.net))],
+      },
+    });
+  }
+
+  sections.push({
+    heading: `${bonusRows.length ? '③' : '②'} 源泉所得税・住民税 納付集計（納付書転記用）`,
+    table: {
+      cols: [{ label: '項目' }, { label: '人数', align: 'right' }, { label: '支給総額', align: 'right' }, { label: '税額', align: 'right' }],
+      rows: [
+        ['給与（俸給・給料等）', payroll.length + '名', yen(grossTotal), yen(t(r => r.incomeTax))],
+        ...(bonusRows.length ? [['賞与', bonusRows.length + '名', yen(bonusTotal), yen(sumBy(bonus, b => b.incomeTax))]] : []),
+        ['特別徴収住民税（預り）', payroll.filter(r => r.residentTax > 0).length + '名', '', yen(residentTotal)],
+      ],
+      total: ['源泉所得税 合計（納付額）', '', '', yen(incomeTaxTotal)],
+    },
+  });
+
+  return {
+    id: 'wage-ledger',
+    title: '賃金台帳・源泉税納付集計',
+    period: monthLabel(month),
+    scope: '全社（本部総合）',
+    sections,
+    footnotes: [
+      '「支援金」は子ども・子育て支援金（2026年4月分〜、健康保険加入者）。',
+      '源泉所得税の納期限は原則翌月10日（納期の特例適用時は7月10日・1月20日）。',
+      '住民税（特別徴収）は従業員マスタ登録の月額に基づく預り額。',
+    ],
+    landscape: true,
+  };
+}
+
+// ============================================================
+// 7. 請求書発行一覧（売掛管理）
+// ============================================================
+
+export function buildInvoiceList({ month, invoices }) {
+  const monthStart = month + '-01';
+  const list = invoices
+    .filter(i => (i.issueDate || '').startsWith(month))
+    .sort((a, b) => (a.issueDate || '').localeCompare(b.issueDate || ''));
+
+  const rows = list.map(i => [
+    fmtDate(i.issueDate),
+    i.docNumber || '',
+    DOC_TYPE_MAP[i.type]?.label || i.type || '',
+    i.clientCompany || i.clientName || '',
+    STATUS_MAP[i.status]?.label || i.status || '',
+    yen(i.totalAmount),
+  ]);
+
+  const active = list.filter(i => i.status !== 'cancelled' && i.status !== 'draft');
+  const total = sumBy(active, i => i.totalAmount);
+  const paid = sumBy(active.filter(i => i.status === 'paid'), i => i.totalAmount);
+
+  return {
+    id: 'invoice-list',
+    title: '請求書・領収書 発行一覧',
+    period: monthLabel(month),
+    scope: '全社（本部総合）',
+    sections: [
+      {
+        table: {
+          cols: [
+            { label: '発行日', width: 56 }, { label: '番号', width: 110 },
+            { label: '種別', width: 60 }, { label: '宛先' },
+            { label: '状態', width: 60 }, { label: '金額（税込）', align: 'right', width: 110 },
+          ],
+          rows: rows.length ? rows : [['', '', '', '（該当月の発行書類はありません）', '', '-']],
+          total: ['', '', '', '', `有効分 合計（${active.length}件）`, yen(total)],
+        },
+      },
+      {
+        heading: '入金状況',
+        table: {
+          cols: [{ label: '区分' }, { label: '金額', align: 'right' }],
+          rows: [
+            ['入金済', yen(paid)],
+            ['未入金（売掛残）', yen(total - paid)],
+          ],
+        },
+      },
+    ],
+    footnotes: ['「有効分」は下書き・取消を除く発行済＋入金済の書類。'],
+  };
+}
+
+// ============================================================
+// 8. 12ヶ月推移表
+// ============================================================
+
+export function buildTrend({ month, scope, depts, cats, allEntries, allCosts, allCashbook, allPayroll, allBonus }) {
+  const months = lastNMonths(month, 12);
+  const catMap = new Map(cats.map(c => [c.id, c]));
+  const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
+
+  const per = {};
+  for (const m of months) per[m] = { revenue: 0, cost: 0, payroll: 0 };
+
+  for (const e of allEntries) {
+    const m = (e.date || '').slice(0, 7);
+    if (per[m] && inScope(e)) per[m].revenue += Number(e.amount) || 0;
+  }
+  for (const sc of allCosts) {
+    const cat = catMap.get(sc.catId);
+    if (scope !== 'all' && (cat?.dept || 'other') !== scope) continue;
+    if (per[sc.yearMonth]) per[sc.yearMonth].cost += sumBy(asArray(sc.items), i => i.amount);
+  }
+  // レベシェア外注費（月別）
+  for (const m of months) {
+    const monthEntries = allEntries.filter(e => (e.date || '').startsWith(m));
+    for (const r of revShareRows(monthEntries, cats, scope, catMap)) per[m].cost += r.outsource;
+  }
+  for (const e of allCashbook) {
+    const m = (e.date || '').slice(0, 7);
+    if (per[m] && cashbookInScope(e, scope, depts)) per[m].cost += Number(e.amount) || 0;
+  }
+  if (scope === 'all') {
+    for (const r of allPayroll) if (per[r.month]) per[r.month].payroll += Number(r.gross) || 0;
+    for (const b of allBonus)   if (per[b.month]) per[b.month].payroll += Number(b.amount) || 0;
+  }
+
+  const rows = months.map(m => {
+    const p = per[m];
+    const profit = p.revenue - p.cost - p.payroll;
+    return [
+      monthLabel(m),
+      yen(p.revenue), yen(p.cost),
+      scope === 'all' ? yen(p.payroll) : '-',
+      yen(profit),
+      p.revenue > 0 ? Math.round(profit / p.revenue * 100) + '%' : '-',
+    ];
+  });
+
+  const sum = f => months.reduce((s, m) => s + f(per[m]), 0);
+  const totalRev = sum(p => p.revenue), totalCost = sum(p => p.cost), totalPay = sum(p => p.payroll);
+  const totalProfit = totalRev - totalCost - totalPay;
+
+  return {
+    id: 'trend',
+    title: '月次推移表（直近12ヶ月）',
+    period: `${monthLabel(months[0])} 〜 ${monthLabel(month)}`,
+    scope: scopeLabel(scope, depts),
+    sections: [{
+      table: {
+        cols: [
+          { label: '月', width: 90 },
+          { label: '売上高', align: 'right' }, { label: '経費', align: 'right' },
+          { label: '人件費', align: 'right' }, { label: '営業利益', align: 'right' },
+          { label: '利益率', align: 'right', width: 60 },
+        ],
+        rows,
+        total: ['合計', yen(totalRev), yen(totalCost),
+                scope === 'all' ? yen(totalPay) : '-', yen(totalProfit),
+                totalRev > 0 ? Math.round(totalProfit / totalRev * 100) + '%' : '-'],
+      },
+    }],
+    footnotes: [
+      '経費 = 月次コスト + 現金出納帳 + レベニューシェア外注費。',
+      scope === 'all' ? '人件費 = 給与・賞与の額面（法定福利費は含まない）。' : '部門別表示では人件費を含みません。',
+    ],
+  };
+}
+
+// ============================================================
+// CSV 変換（スペック → CSV文字列）
+// ============================================================
+
+export function specToCsv(spec) {
+  const rows = [
+    [spec.title, spec.period, spec.scope],
+    [],
+  ];
+  for (const sec of spec.sections) {
+    if (sec.heading) rows.push([sec.heading]);
+    if (sec.table) {
+      rows.push(sec.table.cols.map(c => c.label));
+      for (const r of sec.table.rows) rows.push(r);
+      if (sec.table.total) rows.push(sec.table.total);
+    }
+    if (sec.note) rows.push([sec.note]);
+    rows.push([]);
+  }
+  if (spec.grandTotal) rows.push([spec.grandTotal.label, spec.grandTotal.value]);
+  for (const f of spec.footnotes || []) rows.push(['※ ' + f]);
+
+  return rows
+    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+}
+
+export function downloadCsv(spec, filenameHint) {
+  const csv = specToCsv(spec);
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${filenameHint}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
