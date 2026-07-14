@@ -112,6 +112,12 @@ export function BonusTab() {
         </div>
       </div>
 
+      ${rates.source === 'default' && html`
+        <div class="note note-warn" style=${{ marginBottom: 12 }}>
+          ⚠ 料率履歴が未設定のため既定値（令和8年度）で計算しています。設定→給与料率でプリセットを適用してください。
+        </div>
+      `}
+
       ${empList.length === 0 ? html`
         <div class="note note-warn">
           従業員が未登録です。「従業員マスタ」タブから追加してください。
@@ -230,7 +236,14 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
         employment: calc.employment, social: calc.social,
         incomeTax: calc.incomeTax, totalDed: calc.totalDed, net: calc.net,
         prevAfterSocial,
-        specialCalc: !!calc.specialCalc,  // 前月給与なしの特殊計算で算出したか
+        // 特殊計算の種別: null=率方式 / 'no-prev'=前月給与なし / 'over-10x'=前月給与の10倍超
+        specialCalc: calc.specialCalc ?? null,
+        // 監査用: 料率の解決元と計算時の状態
+        ratesSource: rates.source ?? null,
+        ratesEffectiveDate: rates.effectiveDate ?? null,
+        age: calc.age ?? null,
+        insuranceNotes: calc.insuranceNotes || '',
+        onLeave: !!calc.onLeave,
       });
     } catch (e) {
       console.error('[payroll/bonus] save failed', e);
@@ -269,6 +282,12 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
 
         ${err && html`<div class="note note-err">${err}</div>`}
 
+        ${(calc.insuranceNotes || calc.onLeave) && html`
+          <div class="note note-warn" style=${{ marginBottom: 12 }}>
+            ${calc.onLeave ? '産休・育休中: 社会保険料を免除しています。 ' : ''}${calc.insuranceNotes}
+          </div>
+        `}
+
         <div style=${{ marginBottom: 14 }}>
           <label style=${{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600 }}>
             賞与額（税込）
@@ -301,6 +320,14 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
               この金額と扶養人数（${emp.dependents || 0}人）で賞与所得税率が決まります。
               ${recentRec.month !== addMonths(month, -1) && html`<br/>
                 ※直近の月次レコード（${monthLabel(recentRec.month)}）を「前月給与」とみなして税率を判定しています。
+              `}
+              ${calc.specialCalc === 'over-10x' && html`
+                <div style=${{ marginTop: 4, color: 'var(--danger)', fontWeight: 600 }}>
+                  賞与（社保控除後）が前月給与（社保控除後）の10倍を超えるため、率方式ではなく
+                  特殊計算（所得税法186条・国税庁タックスアンサーNo.2523）を適用:
+                  税額 = ( 月額表税額((賞与−社保)÷6＋前月給与) − 月額表税額(前月給与) ) × 6。
+                  ※賞与の計算期間が6ヶ月超の場合は ÷12×12 ですが、本システムは6ヶ月以下を前提とします。
+                </div>
               `}
             </div>
           ` : html`

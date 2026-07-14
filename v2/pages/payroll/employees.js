@@ -154,6 +154,15 @@ function EmployeeModal({ initial, onClose }) {
   async function save() {
     setErr(null);
     if (!form.name.trim()) { setErr('氏名は必須です'); return; }
+    // マイカー等通勤で通勤手当あり・片道距離未入力は保存不可
+    // （非課税限度額を判定できず全額課税になってしまうため、距離の登録を必須にする）
+    if (form.commuteIsPublicTransport === false
+        && (Number(form.commuteAllowanceMonthly) || 0) > 0
+        && !(Number(form.commuteDistanceKm) > 0)) {
+      setErr('マイカー等通勤で通勤手当を支給する場合は「片道通勤距離 (km)」を入力してください'
+        + '（非課税限度額の判定に必要です。未入力のままでは通勤手当が全額課税で計算されます）');
+      return;
+    }
     setBusy(true);
     try {
       await repos.payrollEmployees.upsert({
@@ -354,7 +363,8 @@ function EmployeeModal({ initial, onClose }) {
                        style=${{ textAlign: 'right', fontFamily: 'var(--font-num)' }}
                        placeholder="例: 12" />
                 <div style=${{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
-                  マイカー等の非課税限度額を距離段階で判定します（未入力は上限31,600円で計算）
+                  マイカー等の非課税限度額を距離段階で判定します（通勤手当がある場合は入力必須。
+                  未入力のままでは全額課税で計算されます）
                 </div>
               </div>
             `}
@@ -383,6 +393,10 @@ function EmployeeModal({ initial, onClose }) {
                 退職済み（給与計算の対象外にする）
               </label>
             `}
+            <div style=${{ fontSize: 10, color: 'var(--text-3)', width: '100%' }}>
+              ※ 産休・育休の社保免除は、育休開始月14日以上・月末在籍などの法定要件を判定しません。
+              チェック中の月は一律免除するため、開始・終了月の該当可否は手動で確認してください。
+            </div>
           </div>
 
           <div class="card" style=${{ padding: 14, background: 'var(--primary-soft)' }}>

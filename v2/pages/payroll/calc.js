@@ -6,8 +6,10 @@
    - 所得税: tax-table.js（月額表/電算機特例を年次で自動切替）
    - 子ども・子育て支援金: 2026年4月〜、健保加入者対象
    - 通勤手当: 非課税限度額を自動分離（所得税法施行令20条の2、
-     マイカー等は片道距離の段階別上限に対応）
+     マイカー等は片道距離の段階別上限に対応。距離未入力は安全側=全額課税）
    - 年齢による保険切替: 40/65/70/75歳（生年月日登録時のみ自動判定）
+     判定は「到達日=誕生日の前日」（年齢計算ニ関スル法律・民法143条）が
+     属する月を基準とする。75歳のみ誕生日当日（後期高齢者医療への移行日）。
    - 産休・育休: 社会保険料免除（健保法159条等）
    ============================================================ */
 
@@ -135,9 +137,14 @@ export function calcChildSupportPremium(stdRemuneration, ratePercent = DEFAULT_C
  * @param ratesList payrollRates docs: [{effectiveDate, health:{pref:%}, care,
  *                  pension, employmentEmployee, employmentEmployer, childSupport}]
  * @param legacy    旧 settings/payroll_*_rates 由来のフォールバック（省略可）
- * @returns {{health:{}, care, pension, employmentEmployee, employmentEmployer, childSupport, effectiveDate}}
+ * @returns {{health:{}, care, pension, employmentEmployee, employmentEmployer,
+ *            childSupport, effectiveDate, source}}
+ *          source: 主たる解決元 'history'（料率履歴）| 'legacy'（旧settings）
+ *                  | 'default'（コード内既定値）— 監査・警告表示用の追加プロパティ。
+ *                  既存の分割代入とは後方互換（プロパティ追加のみ）。
  */
 export function getRatesFor(month, ratesList, legacy = {}) {
+  const hasLegacy = !!legacy && Object.values(legacy).some(v => v != null);
   const base = {
     health: legacy.health || DEFAULT_HEALTH_RATES,
     care: legacy.care ?? DEFAULT_CARE_RATE,
@@ -146,9 +153,18 @@ export function getRatesFor(month, ratesList, legacy = {}) {
     employmentEmployer: legacy.employmentEmployer ?? DEFAULT_EMPLOYMENT_RATES.employer,
     childSupport: legacy.childSupport ?? DEFAULT_CHILD_SUPPORT_RATE,
     effectiveDate: null,
+    source: hasLegacy ? 'legacy' : 'default',
   };
   const hit = (ratesList || [])
-    .filter(r => r && r.effectiveDate && r.effectiveDate <= month)
+    .filter(r => {
+      if (!r || !r.effectiveDate) return false;
+      // effectiveDate が 'YYYY-MM' 形式でない履歴docは文字列比較が壊れるため無視
+      if (!/^\d{4}-\d{2}$/.test(String(r.effectiveDate))) {
+        console.warn('[payroll/calc] effectiveDate が YYYY-MM 形式でない料率履歴を無視します:', r.effectiveDate);
+        return false;
+      }
+      return r.effectiveDate <= month;
+    })
     .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
   if (!hit) return base;
   return {
@@ -159,12 +175,14 @@ export function getRatesFor(month, ratesList, legacy = {}) {
     employmentEmployer: hit.employmentEmployer ?? base.employmentEmployer,
     childSupport: hit.childSupport ?? base.childSupport,
     effectiveDate: hit.effectiveDate,
+    source: 'history',
   };
 }
 
 // ---- 年齢・休職・通勤手当 ------------------------------------------------------
 
-/** 指定月（'YYYY-MM'、月の中央で評価）時点の年齢。生年月日未登録は null。 */
+/** 指定月（'YYYY-MM'、月の中央で評価）時点の年齢。生年月日未登録は null。
+ *  表示・監査用。保険の有効判定には使わない（判定は ageAttainmentMonth 基準）。 */
 export function getAgeAt(birthDate, month) {
   if (!birthDate) return null;
   const bd = new Date(birthDate);
@@ -176,10 +194,37 @@ export function getAgeAt(birthDate, month) {
   return age;
 }
 
+/** 現在の月 'YYYY-MM'（ローカル時刻） */
+function currentMonthStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
 /**
- * 指定月時点の保険適用状況。
- * - 介護保険: 40〜64歳（健保加入者のみ）。生年月日未登録時は careEligible を尊重
- * - 厚生年金: 70歳到達で資格喪失 / 健康保険: 75歳到達で喪失
+ * 「age歳到達月」('YYYY-MM') を返す。生年月日不正は null。
+ * 年齢計算ニ関スル法律・民法143条: 到達日 = age歳の誕生日の「前日」。
+ * したがって1日生まれは前日=前月末日となり、到達月は誕生月の前月になる。
+ * 例外: 後期高齢者医療（75歳）のみ「誕生日当日」に資格取得するため、
+ * onBirthday=true で誕生日当日の属する月を返す。
+ * 2/29生まれの平年は Date の繰上げ（3/1）から1日引いて 2/28 が到達日となり法令どおり。
+ */
+export function ageAttainmentMonth(birthDate, age, onBirthday = false) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(birthDate || ''));
+  if (!m) return null;
+  const dt = new Date(+m[1] + age, +m[2] - 1, +m[3] - (onBirthday ? 0 : 1));
+  if (isNaN(dt.getTime())) return null;
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+}
+
+/**
+ * 指定月時点の保険適用状況。判定はすべて「到達月」（到達日=誕生日の前日が
+ * 属する月。75歳のみ誕生日当日）と対象月の比較で行う。
+ * - 介護保険(2号): 40歳到達日の属する月から徴収開始、
+ *   65歳到達日の属する月から徴収終了（=その月の給与天引きなし。以降は1号として市区町村徴収）
+ * - 厚生年金: 70歳到達日の属する月から資格喪失（その月の保険料なし）
+ * - 健康保険: 75歳の「誕生日当日」に後期高齢者医療へ移行
+ *   （誕生日の属する月から健保保険料なし）
+ * - 生年月日未登録時は careEligible（手動フラグ）を尊重
  * - 子ども・子育て支援金: 健保加入と同条件
  */
 export function getInsuranceStatus(emp, month) {
@@ -194,11 +239,22 @@ export function getInsuranceStatus(emp, month) {
   if (age === null) {
     care = health && !!emp.careEligible;
   } else {
-    if (health && age >= 75) { health = false; notes.push('75歳到達: 健康保険喪失（後期高齢者医療へ）'); }
-    if (pension && age >= 70) { pension = false; notes.push('70歳到達: 厚生年金資格喪失'); }
-    care = health && age >= 40 && age < 65;
+    const m = month || currentMonthStr();
+    const m40 = ageAttainmentMonth(emp.birthDate, 40);
+    const m65 = ageAttainmentMonth(emp.birthDate, 65);
+    const m70 = ageAttainmentMonth(emp.birthDate, 70);
+    const m75 = ageAttainmentMonth(emp.birthDate, 75, true);  // 75歳のみ誕生日当日基準
+    if (health && m75 && m >= m75) {
+      health = false;
+      notes.push('75歳到達: 健康保険喪失（誕生日当日から後期高齢者医療へ・当月から保険料なし）');
+    }
+    if (pension && m70 && m >= m70) {
+      pension = false;
+      notes.push('70歳到達: 厚生年金資格喪失（到達月から保険料なし）');
+    }
+    care = health && !!m40 && m >= m40 && !(m65 && m >= m65);
     if (care && !emp.careEligible) notes.push('40〜64歳: 介護保険料を自動適用');
-    if (age >= 65 && emp.careEligible) notes.push('65歳到達: 介護保険料（給与天引き）終了');
+    if (m65 && m >= m65 && emp.careEligible) notes.push('65歳到達: 介護保険料（給与天引き）終了');
   }
 
   return {
@@ -250,8 +306,8 @@ export function carCommuteCap(distanceKm, month) {
  * 通勤手当の課税・非課税分離。
  * 公共交通機関: 月150,000円まで非課税。
  * マイカー等: 片道距離(km)の段階別上限（carCommuteCap）。
- * 距離未入力の既存データは従来どおり31,600円を上限とし、
- * distanceUnknown フラグで注記できるようにする。
+ * 距離未入力は非課税限度額を判定できないため「安全側=全額課税」とし、
+ * distanceUnknown フラグで注記する（過少徴収を防ぐ。距離登録で解消）。
  */
 export function splitCommuteAllowance(monthly, isPublicTransport = true, distanceKm = null, month = null) {
   const m = Math.max(0, Number(monthly) || 0);
@@ -262,7 +318,7 @@ export function splitCommuteAllowance(monthly, isPublicTransport = true, distanc
   } else if (Number(distanceKm) > 0) {
     cap = carCommuteCap(distanceKm, month);
   } else {
-    cap = 31600;  // 距離未入力: 旧上限31,600円で保守的に計算（要距離登録）
+    cap = 0;  // 距離未入力: 全額課税（安全側）。従業員マスタで片道距離の登録が必要
     distanceUnknown = m > 0;
   }
   const nonTaxable = Math.min(m, cap);
@@ -325,9 +381,11 @@ export function calcMonthlyPaycheck(emp, input = {}) {
     : getHealthStandard(basePay + allowance + commute.total);
   const stdPension = Math.min(stdHealth, PENSION_CAP);
 
-  const healthRate = (rates.health?.[emp.prefecture]
+  const healthRateResolved = (rates.health?.[emp.prefecture]
     ?? rates.healthRate  // 旧形式との互換
-    ?? DEFAULT_HEALTH_RATES[emp.prefecture] ?? 10.0);
+    ?? DEFAULT_HEALTH_RATES[emp.prefecture]);
+  const healthRateFallback = healthRateResolved == null;  // 都道府県料率が全経路で未解決
+  const healthRate  = healthRateResolved ?? 10.0;
   const careRate    = rates.care ?? rates.careRate ?? DEFAULT_CARE_RATE;
   const pensionRate = rates.pension ?? rates.pensionRate ?? PENSION_RATE;
   const empRate     = rates.employmentEmployee ?? DEFAULT_EMPLOYMENT_RATES.employee;
@@ -354,7 +412,11 @@ export function calcMonthlyPaycheck(emp, input = {}) {
   let insuranceNotes = ins.notes;
   if (commute.distanceUnknown) {
     insuranceNotes = (insuranceNotes ? insuranceNotes + ' / ' : '')
-      + 'マイカー通勤: 距離未入力のため非課税上限31,600円で計算（従業員マスタで片道距離を登録してください）';
+      + 'マイカー通勤: 片道距離が未入力のため通勤手当を全額課税で計算しています（従業員マスタで片道距離を登録してください）';
+  }
+  if (ins.health && healthRateFallback) {
+    insuranceNotes = (insuranceNotes ? insuranceNotes + ' / ' : '')
+      + `健保料率: 都道府県「${emp.prefecture || '未設定'}」の料率が未登録のため10.0%で計算しています（設定→給与料率を確認してください）`;
   }
 
   return {
@@ -377,7 +439,11 @@ export function calcMonthlyPaycheck(emp, input = {}) {
  * @param emp    payrollEmployees doc
  * @param input  { month, amount, prevMonthAfterSocial, hasPrevRecord?, rates }
  *               hasPrevRecord: false のとき「前月中に給与の支払がない」場合の
- *               特殊計算（所得税法186条）を適用する。省略時は従来どおり率方式。
+ *               特殊計算（所得税法186条）を適用する。省略時は率方式だが、
+ *               賞与（社保控除後）が前月給与（社保控除後）の10倍を超える場合は
+ *               自動的に特殊計算（国税庁タックスアンサーNo.2523）に切り替える。
+ * @returns      specialCalc: null（率方式）| 'no-prev'（前月給与なし）
+ *               | 'over-10x'（前月給与の10倍超）
  */
 export function calcBonusPaycheck(emp, input = {}) {
   const month = input.month || null;
@@ -396,8 +462,10 @@ export function calcBonusPaycheck(emp, input = {}) {
   const healthBase  = stdBonus;
   const pensionBase = Math.min(stdBonus, 1500000);
 
-  const healthRate  = (rates.health?.[emp.prefecture]
-    ?? rates.healthRate ?? DEFAULT_HEALTH_RATES[emp.prefecture] ?? 10.0);
+  const healthRateResolved = (rates.health?.[emp.prefecture]
+    ?? rates.healthRate ?? DEFAULT_HEALTH_RATES[emp.prefecture]);
+  const healthRateFallback = healthRateResolved == null;
+  const healthRate  = healthRateResolved ?? 10.0;
   const careRate    = rates.care ?? rates.careRate ?? DEFAULT_CARE_RATE;
   const pensionRate = rates.pension ?? rates.pensionRate ?? PENSION_RATE;
   const empRate     = rates.employmentEmployee ?? DEFAULT_EMPLOYMENT_RATES.employee;
@@ -414,29 +482,48 @@ export function calcBonusPaycheck(emp, input = {}) {
   const social = health + care + pension + childSupport + employment;
 
   const taxableBonus = Math.max(0, amount - social);
+  const dep = emp.dependents || 0;
   let incomeTax;
   let rate = null;
-  let specialCalc = false;
-  if (hasPrevRecord) {
-    // 通常: 賞与所得税 = (賞与 − 社保) × 算出率（1円未満切捨て）
-    rate = getBonusTaxRateForMonth(prevMonthAfterSocial, emp.dependents || 0, month);
-    incomeTax = Math.floor(taxableBonus * rate);
-  } else {
-    // 特殊計算（所得税法186条）: 前月中に給与の支払がない場合、
-    // (賞与 − 社保) ÷ 6 を月額表（甲欄）に当てて求めた税額 × 6。
+  let specialCalc = null;  // null | 'no-prev' | 'over-10x'
+  if (!hasPrevRecord) {
+    // 特殊計算①（所得税法186条）: 前月中に給与の支払がない場合、
+    // (賞与 − 社保) ÷ 6（1円未満切捨て）を月額表（甲欄）に当てて求めた税額 × 6。
     // ※賞与の計算期間が6ヶ月超の場合は ÷12 ×12 だが、本システムは
     //   6ヶ月以下（年2回賞与）を前提とする。
-    specialCalc = true;
+    specialCalc = 'no-prev';
     const monthlyEquiv = Math.floor(taxableBonus / 6);
-    incomeTax = calcIncomeTaxForMonth(monthlyEquiv, emp.dependents || 0, month) * 6;
+    incomeTax = calcIncomeTaxForMonth(monthlyEquiv, dep, month) * 6;
+  } else if (taxableBonus > prevMonthAfterSocial * 10) {
+    // 特殊計算②（所得税法186条・国税庁タックスアンサーNo.2523）:
+    // 賞与（社保控除後）が前月給与（社保控除後）の10倍を「超える」場合、
+    //   税額 = { 月額表税額( (賞与−社保)÷6 ＋ 前月の社保控除後給与 )
+    //            − 月額表税額( 前月の社保控除後給与 ) } × 6
+    // ÷6 は1円未満切捨て。10倍ちょうどは率方式のまま（「超える場合」のみ）。
+    // ※計算期間6ヶ月超は ÷12 ×12 だが、本システムは6ヶ月以下を前提とする。
+    specialCalc = 'over-10x';
+    const monthlyEquiv = Math.floor(taxableBonus / 6);
+    const taxWithBonus = calcIncomeTaxForMonth(monthlyEquiv + prevMonthAfterSocial, dep, month);
+    const taxPrevOnly  = calcIncomeTaxForMonth(prevMonthAfterSocial, dep, month);
+    incomeTax = Math.max(0, taxWithBonus - taxPrevOnly) * 6;
+  } else {
+    // 通常: 賞与所得税 = (賞与 − 社保) × 算出率（1円未満切捨て）
+    rate = getBonusTaxRateForMonth(prevMonthAfterSocial, dep, month);
+    incomeTax = Math.floor(taxableBonus * rate);
   }
 
   const totalDed = social + incomeTax;
   const net = amount - totalDed;
 
+  let insuranceNotes = ins.notes;
+  if (ins.health && healthRateFallback) {
+    insuranceNotes = (insuranceNotes ? insuranceNotes + ' / ' : '')
+      + `健保料率: 都道府県「${emp.prefecture || '未設定'}」の料率が未登録のため10.0%で計算しています（設定→給与料率を確認してください）`;
+  }
+
   return {
     amount, health, pension, care, childSupport, employment,
     social, incomeTax, taxRate: rate, specialCalc, totalDed, net,
-    age: ins.age, insuranceNotes: ins.notes, onLeave,
+    age: ins.age, insuranceNotes, onLeave,
   };
 }

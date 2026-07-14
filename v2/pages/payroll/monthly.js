@@ -82,6 +82,18 @@ export function MonthlyTab() {
         </div>
       </div>
 
+      ${rates.source === 'default' && html`
+        <div class="note note-warn" style=${{ marginBottom: 12 }}>
+          ⚠ 料率履歴が未設定のため既定値（令和8年度）で計算しています。設定→給与料率でプリセットを適用してください。
+        </div>
+      `}
+      ${month < '2026-01' && html`
+        <div class="note note-info" style=${{ marginBottom: 12 }}>
+          ※ 2026年1月より前の月の所得税は令和6年月額表の近似テーブル（主要区分の抜粋）で計算しています。
+          過去月の再計算は参考値としてください。
+        </div>
+      `}
+
       ${empList.length === 0 ? html`
         <div class="note note-warn">
           従業員が未登録です。「従業員マスタ」タブから追加してください。
@@ -257,6 +269,12 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
         residentTax:  calc.residentTax,
         totalDed:     calc.totalDed,
         net:          calc.net,
+        // 監査用: 料率の解決元と計算時の状態
+        ratesSource: rates.source ?? null,
+        ratesEffectiveDate: rates.effectiveDate ?? null,
+        age: calc.age ?? null,
+        insuranceNotes: calc.insuranceNotes || '',
+        onLeave: !!calc.onLeave,
       });
     } catch (e) {
       console.error('[payroll/monthly] save failed', e);
@@ -356,6 +374,9 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
             ${typeInfo.hasEmployment && html`<${Line} label="雇用保険" value=${calc.employment} />`}
             <${Line} label="所得税" value=${calc.incomeTax} />
             <${Line} label="住民税" value=${calc.residentTax} />
+            <div style=${{ fontSize: 10, color: 'var(--text-3)', marginTop: 6 }}>
+              ※ 所得税は「扶養控除等申告書」提出済（甲欄）前提。乙欄・丙欄は未対応。
+            </div>
           </div>
           <div>
             <div style=${{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700,
@@ -459,37 +480,67 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
   const [skipExisting, setSkipExisting] = useState(true);
 
   async function run() {
+    // 上書き対象（既存レコードあり・スキップしない）を事前に数えて確認を取る
+    if (!skipExisting) {
+      const overwriteCount = employees.filter(e => recordMap.has(e.id)).length;
+      if (overwriteCount > 0) {
+        const ok = confirm(
+          `計算済みの既存 ${overwriteCount} 件を、最新の従業員マスタ・料率で再計算して上書きします。\n` +
+          `歩合給・諸手当・控除・労働時間・通勤手当・住民税などの入力値は既存レコードから引き継ぎます（0にリセットしません）。\n\n` +
+          `よろしいですか？`);
+        if (!ok) return;
+      }
+    }
     setBusy(true);
     setLog([]);
     setDone(false);
     const lines = [];
     for (const emp of employees) {
-      if (skipExisting && recordMap.has(emp.id)) {
+      const existing = recordMap.get(emp.id);
+      if (skipExisting && existing) {
         lines.push(`− ${emp.name}: 計算済みのためスキップ`);
         setLog([...lines]);
         continue;
       }
       const typeInfo = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
-      // 時給制で月平均労働時間が未設定（0h）→ 基本給0で保存してしまうためスキップ
+      // 時給制の労働時間: 上書き再計算では既存レコードの入力値を、
+      // 新規計算では従業員マスタの月平均労働時間を使う
+      const hours = existing
+        ? (Number(existing.hours) || 0)
+        : (Number(emp.baseHours) || 0);
+      // 時給制で労働時間が0 → 基本給0で保存してしまうためスキップ
       // （単発保存側の「労働時間0のまま保存しますか？」確認と整合）
-      if (!typeInfo.isSalary && !(Number(emp.baseHours) > 0)) {
+      if (!typeInfo.isSalary && !(hours > 0)) {
         lines.push(`⚠ ${emp.name}: 労働時間未設定のためスキップ（従業員マスタで月平均労働時間を登録してください）`);
         setLog([...lines]);
         continue;
       }
       try {
-        const calc = calcMonthlyPaycheck(emp, {
+        // 既存レコードがある場合は入力値（歩合・手当・控除・通勤・住民税等）を
+        // 引き継いで最新マスタ・料率で再計算する（0リセットしない）
+        const input = existing ? {
+          month,
+          basePay: typeInfo.isSalary ? (Number(existing.basePay ?? emp.monthlySalary) || 0) : 0,
+          hours,
+          commission: Number(existing.commission) || 0,
+          allowance:  Number(existing.allowance)  || 0,
+          deduction:  Number(existing.deduction)  || 0,
+          commute:    existing.commuteTotal ?? undefined,  // 未保存の旧データはマスタ値
+          residentTax: existing.residentTax ?? emp.residentTax ?? 0,
+          rates,
+        } : {
           month,
           basePay: typeInfo.isSalary ? (emp.monthlySalary || 0) : 0,
-          hours: typeInfo.isSalary ? 0 : (emp.baseHours || 0),
+          hours: typeInfo.isSalary ? 0 : hours,
           residentTax: emp.residentTax || 0,
           rates,
-        });
+        };
+        const calc = calcMonthlyPaycheck(emp, input);
         const id = `${month}_${emp.id}`;
         await repos.payrollRecords.setId(id, {
           month, empId: emp.id, empName: emp.name, empType: emp.type,
-          basePay: calc.basePay, hours: Number(emp.baseHours) || 0,
-          commission: 0, allowance: 0, deduction: 0,
+          basePay: calc.basePay, hours,
+          commission: calc.commission, allowance: calc.allowance, deduction: calc.deduction,
           gross: calc.gross,
           commuteTotal: calc.commuteTotal, commuteNonTaxable: calc.commuteNonTaxable,
           stdRemuneration: calc.stdRemuneration,
@@ -499,10 +550,16 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
           taxable: calc.taxable,
           incomeTax: calc.incomeTax, residentTax: calc.residentTax,
           totalDed: calc.totalDed, net: calc.net,
+          // 監査用: 料率の解決元と計算時の状態
+          ratesSource: rates.source ?? null,
+          ratesEffectiveDate: rates.effectiveDate ?? null,
+          age: calc.age ?? null,
+          insuranceNotes: calc.insuranceNotes || '',
+          onLeave: !!calc.onLeave,
         });
         let warn = (!calc.residentTax && emp.type === 'executive') ? ' ⚠住民税¥0' : '';
         if (calc.net < 0) warn += ' ⚠差引支給額がマイナスです（要確認）';
-        lines.push(`${calc.net < 0 ? '⚠' : '✓'} ${emp.name}: 差引 ${formatYen(calc.net)}${warn}`);
+        lines.push(`${calc.net < 0 ? '⚠' : '✓'} ${emp.name}: ${existing ? '再計算(既存値引継) ' : ''}差引 ${formatYen(calc.net)}${warn}`);
       } catch (e) {
         lines.push(`✗ ${emp.name}: ${e.message}`);
       }
@@ -534,6 +591,12 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
                    onChange=${e => setSkipExisting(e.target.checked)} disabled=${busy} />
             計算済みの従業員はスキップする（オフにすると上書き）
           </label>
+          ${!skipExisting && html`
+            <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
+              上書き時は既存レコードの入力値（歩合給・諸手当・控除・労働時間・通勤手当・住民税）を
+              引き継ぎ、最新の従業員マスタ・料率で再計算します。実行前に件数を確認します。
+            </div>
+          `}
 
           ${log.length > 0 && html`
             <div style=${{
