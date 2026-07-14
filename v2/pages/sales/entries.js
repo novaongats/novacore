@@ -8,10 +8,11 @@ import { useState, useEffect, useMemo, useRef } from 'https://esm.sh/preact@10.2
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where, orderBy } from '../../store.js';
 import {
-  dayjs, SALES_DEPTS, deptLabel, deptColor,
+  dayjs, deptLabel, deptColor,
   formatYen, formatNum, today, thisMonth, monthLabel, shortDateLabel,
   addMonths, uid, sumBy, groupBy, asArray,
 } from '../../shared.js';
+import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
 
@@ -35,6 +36,12 @@ export function EntriesTab() {
   );
 
   const cats = useCollection(repos.salesCategories);
+  const depts = useDepts();
+  // 新規入力の選択肢からはアーカイブ済み部門（競艇など）のカテゴリを除外
+  const activeCats = useMemo(() => {
+    const archived = new Set(depts.filter(d => d.archived).map(d => d.key));
+    return asArray(cats.data).filter(c => !archived.has(c.dept));
+  }, [cats.data, depts]);
   const catMap = useMemo(() => {
     const m = new Map();
     for (const c of asArray(cats.data)) m.set(c.id, c);
@@ -56,7 +63,7 @@ export function EntriesTab() {
           からカテゴリを作成してください。
         </div>
       ` : html`
-        <${QuickAddForm} cats=${cats.data} defaultMonth=${month} />
+        <${QuickAddForm} cats=${activeCats} defaultMonth=${month} />
       `}
 
       <${EntryList}
@@ -102,6 +109,7 @@ function MonthBar({ month, onChange }) {
 // ---- KPI row ---------------------------------------------------------------
 
 function KpiRow({ entries, catMap }) {
+  const depts = useDepts();
   const total = sumBy(entries, e => e.amount);
   const count = entries.length;
   const avg   = count > 0 ? Math.round(total / count) : 0;
@@ -127,7 +135,7 @@ function KpiRow({ entries, catMap }) {
           部門別内訳
         </div>
         <div style=${{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          ${SALES_DEPTS
+          ${depts
             .filter(d => deptTotals[d.key])
             .map(d => html`
               <div key=${d.key} style=${{

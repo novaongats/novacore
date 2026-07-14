@@ -9,11 +9,12 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where, orderBy } from '../../store.js';
 import {
-  dayjs, SALES_DEPTS, EXPENSE_ACCOUNTS,
+  dayjs, EXPENSE_ACCOUNTS,
   deptLabel, deptColor, accountLabel,
   formatYen, today, thisMonth, monthLabel, addMonths,
   sumBy, asArray,
 } from '../../shared.js';
+import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
 
@@ -175,6 +176,7 @@ function KpiCard({ label, value, accent }) {
 // ---- Category list ---------------------------------------------------------
 
 function CategoryList({ perCat, onEdit }) {
+  const depts = useDepts();
   // Group by dept
   const rows = Array.from(perCat.values());
   const grouped = new Map();
@@ -183,8 +185,8 @@ function CategoryList({ perCat, onEdit }) {
     if (!grouped.has(k)) grouped.set(k, []);
     grouped.get(k).push(r);
   }
-  // Sort groups by SALES_DEPTS order
-  const orderedKeys = SALES_DEPTS.map(d => d.key).filter(k => grouped.has(k));
+  // Sort groups by dept order
+  const orderedKeys = depts.map(d => d.key).filter(k => grouped.has(k));
   for (const k of grouped.keys()) if (!orderedKeys.includes(k)) orderedKeys.push(k);
 
   return html`

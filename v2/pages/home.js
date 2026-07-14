@@ -9,10 +9,11 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where, orderBy } from '../store.js';
 import {
-  dayjs, SALES_DEPTS, deptLabel, deptColor,
+  dayjs, deptLabel, deptColor,
   formatYen, thisMonth, monthLabel, addMonths, shortDateLabel,
   sumBy, asArray,
 } from '../shared.js';
+import { useDepts } from '../depts.js';
 
 const html = htm.bind(h);
 
@@ -42,6 +43,7 @@ export function HomePage({ user }) {
 
   const cats = asArray(salesCats.data);
   const catMap = new Map(cats.map(c => [c.id, c]));
+  const depts = useDepts();
 
   const stats = useMemo(() => {
     const entries = asArray(curEntries.data);
@@ -69,7 +71,7 @@ export function HomePage({ user }) {
 
     // By-dept
     const byDept = {};
-    for (const d of SALES_DEPTS) byDept[d.key] = 0;
+    for (const d of depts) byDept[d.key] = 0;
     for (const e of entries) {
       const cat = catMap.get(e.catId);
       const dept = cat?.dept || e.dept || 'other';
@@ -77,7 +79,7 @@ export function HomePage({ user }) {
     }
 
     return { totalRevenue, totalCost, profit, mom, byDept, prevRevenue };
-  }, [curEntries.data, curCosts.data, curCashbook.data, prevEntries.data, cats]);
+  }, [curEntries.data, curCosts.data, curCashbook.data, prevEntries.data, cats, depts]);
 
   const recentList = asArray(recentEntries.data).slice(0, 8);
 
@@ -133,7 +135,7 @@ export function HomePage({ user }) {
           ${stats.totalRevenue === 0 ? html`
             <div style=${{ color: 'var(--text-3)', fontSize: 13 }}>データなし</div>
           ` : html`
-            ${SALES_DEPTS.filter(d => stats.byDept[d.key] > 0).map(d => {
+            ${depts.filter(d => stats.byDept[d.key] > 0).map(d => {
               const val = stats.byDept[d.key];
               const pct = stats.totalRevenue > 0 ? val / stats.totalRevenue * 100 : 0;
               return html`

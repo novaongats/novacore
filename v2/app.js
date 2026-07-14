@@ -7,6 +7,7 @@ import { h, render } from 'https://esm.sh/preact@10.22.0';
 import { useState, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { useAuth, signIn, signOut, hasAccess, enableDevBypass } from './auth.js';
+import { initDepts } from './depts.js';
 import { SettingsPage } from './pages/settings.js';
 import { SalesPage } from './pages/sales/index.js';
 import { CashbookPage } from './pages/cashbook/index.js';
@@ -295,6 +296,11 @@ function App() {
 
 function AuthenticatedApp({ user }) {
   const route = useRoute();
+
+  // 事業（部門）マスタの購読開始（デモモードでは静的フォールバックのまま）
+  useEffect(() => {
+    if (!user?._devBypass) initDepts();
+  }, [user]);
 
   // Guard: if user lacks access to current route, bounce to home.
   useEffect(() => {

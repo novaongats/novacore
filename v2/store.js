@@ -85,7 +85,8 @@ export const repos = {
   // Users / profiles
   users: createRepo('users'),
 
-  // Sales (merged: categories + daily entries + monthly cost sheets)
+  // Sales (merged: depts master + categories + daily entries + monthly cost sheets)
+  salesDepts:      createRepo('salesDepts'),
   salesCategories: createRepo('salesCategories'),
   salesEntries:    createRepo('salesEntries'),
   salesCosts:      createRepo('salesCosts'),

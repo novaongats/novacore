@@ -8,10 +8,11 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
 import {
-  dayjs, SALES_DEPTS, deptLabel, deptColor,
+  dayjs, deptLabel, deptColor,
   formatYen, formatPct, thisMonth, monthLabel, addMonths, lastNMonths,
   sumBy, asArray,
 } from '../../shared.js';
+import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
 
@@ -225,8 +226,9 @@ function KpiCard({ label, value, sub, accent }) {
 // ---- Dept bars -------------------------------------------------------------
 
 function DeptBars({ grid, month, cats }) {
+  const depts = useDepts();
   const byDept = summarizeByDept(grid, month);
-  const rows = SALES_DEPTS
+  const rows = depts
     .map(d => ({ ...d, ...byDept[d.key] }))
     .filter(r => r.revenue > 0 || r.cost > 0);
 

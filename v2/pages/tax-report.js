@@ -9,16 +9,18 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../store.js';
 import {
-  dayjs, SALES_DEPTS, EXPENSE_ACCOUNTS,
+  dayjs, EXPENSE_ACCOUNTS,
   deptLabel, accountLabel,
   formatYen, thisMonth, monthLabel, addMonths,
   sumBy, asArray,
 } from '../shared.js';
+import { useDepts } from '../depts.js';
 
 const html = htm.bind(h);
 
 export function TaxReportPage({ user }) {
   const [month, setMonth] = useState(thisMonth());
+  const depts = useDepts();  // 税務は過去実績が主目的のためアーカイブ部門も含む
   const monthStart = month + '-01';
   const monthEnd   = dayjs(monthStart).add(1, 'month').format('YYYY-MM-DD');
 
@@ -50,7 +52,7 @@ export function TaxReportPage({ user }) {
 
     // Sales by dept
     const deptSales = {};
-    for (const d of SALES_DEPTS) deptSales[d.key] = 0;
+    for (const d of depts) deptSales[d.key] = 0;
     let totalSales = 0;
     for (const e of asArray(salesEntries.data)) {
       const cat = catMap.get(e.catId);
@@ -128,14 +130,14 @@ export function TaxReportPage({ user }) {
       docsCount: asArray(documents.data).length,
     };
   }, [salesCats.data, salesEntries.data, salesCosts.data, cashbook.data,
-      payrollRecs.data, payrollBonus.data, invoices.data, documents.data]);
+      payrollRecs.data, payrollBonus.data, invoices.data, documents.data, depts]);
 
   function exportCsv() {
     const rows = [
       ['税理士レポート', `${monthLabel(month)}`, '有限会社NOVA'],
       [],
       ['① 売上集計'],
-      ...SALES_DEPTS.map(d => [d.label, report.deptSales[d.key] || 0]),
+      ...depts.map(d => [d.label, report.deptSales[d.key] || 0]),
       ['合計', report.totalSales],
       [],
       ['② 経費一覧'],
@@ -213,7 +215,7 @@ export function TaxReportPage({ user }) {
           <!-- ① 売上集計 -->
           <${Section} number="①" title="売上集計" color="#6366f1">
             <${KvTable} rows=${[
-              ...SALES_DEPTS.map(d => [d.label, report.deptSales[d.key] || 0]),
+              ...depts.map(d => [d.label, report.deptSales[d.key] || 0]),
               ['__total__', report.totalSales],
             ]} totalLabel="合計" />
           </Section>

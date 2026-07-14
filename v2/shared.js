@@ -15,25 +15,43 @@ dayjs.locale('ja');
 export { dayjs };
 
 // ---- Departments -----------------------------------------------------------
-// v1 had: sns / content / boat / food / other
-// v2: boat/food are being split to separate apps but we keep keys for legacy
-// compatibility during import. UI can filter by .legacy flag later if needed.
+// 事業（部門）は Firestore `salesDepts` コレクションで動的に管理する
+// （購読・シード・フックは depts.js）。ここはそのキャッシュ層と、
+// Firestore 未接続時の静的フォールバック。
+// boat（競艇）/food（飲食）は archived として初期シードされ、新規入力の
+// 選択肢から消えるが、過去データの表示・集計には残る。
 
 export const SALES_DEPTS = [
-  { key: 'sns',     label: 'SNS事業',       color: '#6366f1', short: 'SNS'  },
-  { key: 'content', label: '制作コンテンツ', color: '#7c3aed', short: '制作' },
-  { key: 'boat',    label: '競艇事業',       color: '#e11d48', short: '競艇', legacy: true },
-  { key: 'food',    label: '飲食事業',       color: '#059669', short: '飲食', legacy: true },
-  { key: 'other',   label: 'その他',         color: '#64748b', short: '他'   },
+  { key: 'sns',     label: 'SNS事業',       color: '#6366f1', short: 'SNS',  order: 1 },
+  { key: 'content', label: '制作コンテンツ', color: '#7c3aed', short: '制作', order: 2 },
+  { key: 'boat',    label: '競艇事業',       color: '#e11d48', short: '競艇', order: 3, archived: true },
+  { key: 'food',    label: '飲食事業',       color: '#059669', short: '飲食', order: 4, archived: true },
+  { key: 'other',   label: 'その他',         color: '#64748b', short: '他',   order: 5 },
 ];
 
 export const DEPT_MAP = Object.fromEntries(SALES_DEPTS.map(d => [d.key, d]));
 
+// --- 動的キャッシュ（depts.js が Firestore 購読で更新する）---
+let _depts = SALES_DEPTS;
+const _deptListeners = new Set();
+
+export function setDepts(list) {
+  _depts = (Array.isArray(list) && list.length) ? list : SALES_DEPTS;
+  for (const fn of _deptListeners) { try { fn(_depts); } catch { /* noop */ } }
+}
+export function getDepts({ includeArchived = true } = {}) {
+  return includeArchived ? _depts : _depts.filter(d => !d.archived);
+}
+export function onDeptsChange(fn) {
+  _deptListeners.add(fn);
+  return () => _deptListeners.delete(fn);
+}
+
 export function deptLabel(key) {
-  return DEPT_MAP[key]?.label || key || '-';
+  return _depts.find(d => d.key === key)?.label || DEPT_MAP[key]?.label || key || '-';
 }
 export function deptColor(key) {
-  return DEPT_MAP[key]?.color || '#64748b';
+  return _depts.find(d => d.key === key)?.color || DEPT_MAP[key]?.color || '#64748b';
 }
 
 // ---- Expense accounts (for cost sheets and cashbook) -----------------------

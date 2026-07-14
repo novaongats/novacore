@@ -8,7 +8,8 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection } from '../../store.js';
-import { SALES_DEPTS, deptLabel, deptColor, uid } from '../../shared.js';
+import { deptLabel, deptColor, uid } from '../../shared.js';
+import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
 
@@ -120,6 +121,7 @@ function CategoryRow({ cat, onEdit }) {
 
 function CategoryModal({ initial, onClose }) {
   const isNew = !initial.id;
+  const depts = useDepts();
   const [form, setForm] = useState(() => ({
     name: initial.name || '',
     dept: initial.dept || 'sns',
@@ -131,6 +133,11 @@ function CategoryModal({ initial, onClose }) {
   }));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+
+  // アーカイブ済み部門は選択肢から除外。ただし編集中カテゴリの現在値は残す
+  const deptOptions = depts
+    .filter(d => !d.archived || d.key === form.dept)
+    .map(d => ({ value: d.key, label: d.label + (d.archived ? '（アーカイブ済）' : '') }));
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -194,9 +201,9 @@ function CategoryModal({ initial, onClose }) {
 
           <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div class="field">
-              <label>部門 *</label>
+              <label>事業（部門） *</label>
               <${Select} value=${form.dept} onChange=${v => set('dept', v)} disabled=${busy}
-                         options=${SALES_DEPTS.map(d => ({ value: d.key, label: d.label }))} />
+                         options=${deptOptions} />
             </div>
             <div class="field">
               <label>グループ（任意）</label>
