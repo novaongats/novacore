@@ -45,12 +45,13 @@ export function ListTab() {
   }), [filtered]);
 
   function exportCsv() {
-    const header = ['月', '従業員ID', '氏名', '雇用形態', '総支給', '健保', '年金', '介護', '雇保', '所得税', '住民税', '控除計', '差引支給'];
+    const header = ['月', '従業員ID', '氏名', '雇用形態', '総支給', '通勤手当', '健保', '年金', '介護', '子育て支援金', '雇保', '所得税', '住民税', '控除計', '差引支給'];
     const lines = [header.join(',')];
     for (const r of filtered) {
       lines.push([
         r.month, r.empId, r.empName, EMP_TYPE_MAP[r.empType]?.label || r.empType,
-        r.gross || 0, r.health || 0, r.pension || 0, r.care || 0,
+        r.gross || 0, r.commuteTotal || 0, r.health || 0, r.pension || 0, r.care || 0,
+        r.childSupport || 0,
         r.employment || 0, r.incomeTax || 0, r.residentTax || 0,
         r.totalDed || 0, r.net || 0,
       ].join(','));

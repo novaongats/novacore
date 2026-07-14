@@ -19,13 +19,19 @@ const EMPTY = {
   type: 'regular',
   prefecture: 'aichi',
   joinDate: '',
+  birthDate: '',            // 40/65/70/75歳の保険切替を自動判定
   monthlySalary: '',
   hourlyWage: '',
   baseHours: '',
   dependents: 0,
   residentTax: '',
   careEligible: false,
-  stdRemuneration: '',  // 手動上書き可能
+  stdRemuneration: '',      // 手動上書き可能（0=自動計算）
+  commuteAllowanceMonthly: '',   // 通勤手当（月額）
+  commuteIsPublicTransport: true,
+  onMaternityLeave: false,  // 産休（社保免除）
+  onChildcareLeave: false,  // 育休（社保免除）
+  archived: false,          // 退職済み（過去データ保護のため削除ではなくアーカイブ）
   memo: '',
 };
 
@@ -34,6 +40,7 @@ export function EmployeesTab() {
   const [editing, setEditing] = useState(null);
 
   const list = [...asArray(data)].sort((a, b) =>
+    (a.archived ? 1 : 0) - (b.archived ? 1 : 0) ||
     (a.joinDate || '').localeCompare(b.joinDate || '') ||
     (a.name || '').localeCompare(b.name || '', 'ja')
   );
@@ -89,9 +96,15 @@ function Row({ emp, onEdit }) {
   const std = emp.stdRemuneration || getHealthStandard(emp.monthlySalary || emp.hourlyWage * (emp.baseHours || 160));
   const grade = findGrade(std);
   return html`
-    <div style=${tableRow} onClick=${onEdit}>
+    <div style=${{ ...tableRow, opacity: emp.archived ? 0.45 : 1 }} onClick=${onEdit}>
       <div>
-        <div style=${{ fontSize: 13, fontWeight: 600 }}>${emp.name || '(無名)'}</div>
+        <div style=${{ fontSize: 13, fontWeight: 600 }}>
+          ${emp.name || '(無名)'}
+          ${emp.archived && html`<span style=${{
+            marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 999,
+            background: 'var(--bg-alt)', color: 'var(--text-3)', fontWeight: 600,
+          }}>退職済</span>`}
+        </div>
         ${emp.nameKana && html`
           <div style=${{ fontSize: 11, color: 'var(--text-3)' }}>${emp.nameKana}</div>
         `}
@@ -152,6 +165,7 @@ function EmployeeModal({ initial, onClose }) {
         type: form.type,
         prefecture: form.prefecture,
         joinDate: form.joinDate || '',
+        birthDate: form.birthDate || '',
         monthlySalary: Number(form.monthlySalary) || 0,
         hourlyWage:    Number(form.hourlyWage) || 0,
         baseHours:     Number(form.baseHours) || 0,
@@ -159,6 +173,11 @@ function EmployeeModal({ initial, onClose }) {
         residentTax:   Number(form.residentTax) || 0,
         careEligible:  !!form.careEligible,
         stdRemuneration: Number(form.stdRemuneration) || 0,  // 0 = auto
+        commuteAllowanceMonthly: Number(form.commuteAllowanceMonthly) || 0,
+        commuteIsPublicTransport: form.commuteIsPublicTransport !== false,
+        onMaternityLeave: !!form.onMaternityLeave,
+        onChildcareLeave: !!form.onChildcareLeave,
+        archived: !!form.archived,
         memo: (form.memo || '').trim(),
       });
       onClose();
@@ -228,11 +247,21 @@ function EmployeeModal({ initial, onClose }) {
             </div>
           </div>
 
-          <div class="field">
-            <label>メールアドレス（給与明細の送付先）</label>
-            <input type="email" value=${form.email}
-                   onInput=${e => set('email', e.target.value)} disabled=${busy}
-                   placeholder="taro@example.com" />
+          <div style=${{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }}>
+            <div class="field">
+              <label>メールアドレス（給与明細の送付先）</label>
+              <input type="email" value=${form.email}
+                     onInput=${e => set('email', e.target.value)} disabled=${busy}
+                     placeholder="taro@example.com" />
+            </div>
+            <div class="field">
+              <label>生年月日</label>
+              <input type="date" value=${form.birthDate}
+                     onInput=${e => set('birthDate', e.target.value)} disabled=${busy} />
+              <div style=${{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                登録すると介護保険(40歳)等を自動判定
+              </div>
+            </div>
           </div>
 
           ${typeInfo.isSalary ? html`
@@ -285,11 +314,48 @@ function EmployeeModal({ initial, onClose }) {
             </div>
           </div>
 
-          <label style=${checkLabel}>
-            <input type="checkbox" checked=${form.careEligible}
-                   onChange=${e => set('careEligible', e.target.checked)} disabled=${busy} />
-            介護保険対象（満40歳以上）
-          </label>
+          <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div class="field">
+              <label>通勤手当（月額）</label>
+              <input type="number" value=${form.commuteAllowanceMonthly}
+                     onInput=${e => set('commuteAllowanceMonthly', e.target.value)} disabled=${busy}
+                     style=${{ textAlign: 'right', fontFamily: 'var(--font-num)' }}
+                     placeholder="0" />
+              <div style=${{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                非課税限度額（公共交通: 15万円）を自動で分離します
+              </div>
+            </div>
+            <label style=${{ ...checkLabel, marginTop: 22 }}>
+              <input type="checkbox" checked=${form.commuteIsPublicTransport !== false}
+                     onChange=${e => set('commuteIsPublicTransport', e.target.checked)} disabled=${busy} />
+              公共交通機関を利用（オフ=マイカー等）
+            </label>
+          </div>
+
+          <div style=${{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+            <label style=${checkLabel}>
+              <input type="checkbox" checked=${form.careEligible}
+                     onChange=${e => set('careEligible', e.target.checked)} disabled=${busy} />
+              介護保険対象（生年月日未登録時に使用）
+            </label>
+            <label style=${checkLabel}>
+              <input type="checkbox" checked=${form.onMaternityLeave}
+                     onChange=${e => set('onMaternityLeave', e.target.checked)} disabled=${busy} />
+              産休中（社保免除）
+            </label>
+            <label style=${checkLabel}>
+              <input type="checkbox" checked=${form.onChildcareLeave}
+                     onChange=${e => set('onChildcareLeave', e.target.checked)} disabled=${busy} />
+              育休中（社保免除）
+            </label>
+            ${!isNew && html`
+              <label style=${checkLabel}>
+                <input type="checkbox" checked=${form.archived}
+                       onChange=${e => set('archived', e.target.checked)} disabled=${busy} />
+                退職済み（給与計算の対象外にする）
+              </label>
+            `}
+          </div>
 
           <div class="card" style=${{ padding: 14, background: 'var(--primary-soft)' }}>
             <div style=${{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>

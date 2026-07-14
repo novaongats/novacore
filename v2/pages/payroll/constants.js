@@ -61,28 +61,62 @@ export const PREFECTURES = [
   { id: 'gifu',     label: '岐阜県' },
 ];
 
-// ---- Default health insurance rates (全国健康保険協会 / 協会けんぽ, 2024) --
-// Stored in settings/payroll_health_rates. These are defaults if not set.
-// % = percentage of standard remuneration (折半前の総料率)
+// ---- Default rates（料率履歴 payrollRates が無い月のフォールバック）---------
+// 実際の計算は payrollRates コレクション（適用年月付き履歴）を優先する。
+// ここは令和8年度（2026年度）の公表値。
+
+// 健康保険料率（協会けんぽ、令和8年3月分〜）% = 折半前の総料率
 export const DEFAULT_HEALTH_RATES = {
-  tokyo:    9.98,
-  kanagawa: 10.02,
-  aichi:    10.01,
-  gifu:     10.06,
+  tokyo:    9.85,
+  kanagawa: 9.92,
+  aichi:    9.93,
+  gifu:     9.80,
 };
 
-// 介護保険料率 (40歳以上) — 全国共通、2024
-export const DEFAULT_CARE_RATE = 1.60;  // 折半前
+// 介護保険料率 (40〜64歳) — 全国共通、令和8年3月分〜
+export const DEFAULT_CARE_RATE = 1.62;  // 折半前
 
 // 厚生年金保険料率 — 全国共通固定（2017年以降）
 export const PENSION_RATE = 18.30;  // 折半前
 
-// 雇用保険料率（一般の事業、2024-2025）
-// 雇用保険は従業員負担率と事業主負担率が異なる（労災保険等の事業主単独負担あり）
+// 雇用保険料率（一般の事業、令和8年4月〜）
+// 雇用保険は従業員負担率と事業主負担率が異なる（二事業分の事業主単独負担あり）
 export const DEFAULT_EMPLOYMENT_RATES = {
-  employee: 0.60,  // 従業員負担 (%)
-  employer: 0.95,  // 事業主負担 (%)
+  employee: 0.50,  // 従業員負担 (%)
+  employer: 0.85,  // 事業主負担 (%)
 };
+
+// 子ども・子育て支援金率 — 全国共通、2026年4月分〜（折半前）
+export const DEFAULT_CHILD_SUPPORT_RATE = 0.23;
+export const CHILD_SUPPORT_FROM = '2026-04';
+
+// ---- 料率プリセット（rates.js の「プリセット適用」で payrollRates へ登録）----
+// 出典: 協会けんぽ 令和8年度都道府県別料率 / 厚労省 令和8年度雇用保険料率
+// ※健保・介護は3月分から、雇用保険は4月から適用が始まるため2レコードに分かれる
+export const RATE_PRESETS = [
+  {
+    effectiveDate: '2026-03',
+    label: '令和8年度 健保・介護改定（2026年3月分〜）',
+    health: { tokyo: 9.85, kanagawa: 9.92, aichi: 9.93, gifu: 9.80 },
+    care: 1.62,
+    pension: 18.30,
+    employmentEmployee: 0.55,  // 雇用保険は令和7年度料率のまま
+    employmentEmployer: 0.90,
+    childSupport: 0.23,
+    note: '協会けんぽ令和8年度（東京9.85/神奈川9.92/愛知9.93/岐阜9.80、介護1.62）',
+  },
+  {
+    effectiveDate: '2026-04',
+    label: '令和8年度 雇用保険改定 + 子育て支援金開始（2026年4月〜）',
+    health: { tokyo: 9.85, kanagawa: 9.92, aichi: 9.93, gifu: 9.80 },
+    care: 1.62,
+    pension: 18.30,
+    employmentEmployee: 0.50,
+    employmentEmployer: 0.85,
+    childSupport: 0.23,
+    note: '雇用保険（一般）労働者0.5%/事業主0.85%。子ども・子育て支援金0.23%開始',
+  },
+];
 
 // ---- 標準報酬月額表（健康保険）--- 令和6年3月 ------------------------------
 // [等級, 標準報酬月額, 月給下限, 月給上限未満]

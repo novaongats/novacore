@@ -81,9 +81,10 @@ function Slip({ rec, issuer, kind }) {
             <${Row} label="賞与額" value=${rec.amount} />
           ` : html`
             <${Row} label="基本給" value=${rec.basePay} />
-            ${(rec.commission || 0) > 0 && html`<${Row} label="歩合給" value=${rec.commission} />`}
-            ${(rec.allowance  || 0) > 0 && html`<${Row} label="諸手当" value=${rec.allowance} />`}
-            ${(rec.deduction  || 0) > 0 && html`<${Row} label="控除" value=${-rec.deduction} />`}
+            ${(rec.commission   || 0) > 0 && html`<${Row} label="歩合給" value=${rec.commission} />`}
+            ${(rec.allowance    || 0) > 0 && html`<${Row} label="諸手当" value=${rec.allowance} />`}
+            ${(rec.commuteTotal || 0) > 0 && html`<${Row} label="通勤手当" value=${rec.commuteTotal} />`}
+            ${(rec.deduction    || 0) > 0 && html`<${Row} label="控除" value=${-rec.deduction} />`}
           `}
           <${Row} label="総支給額" value=${isBonus ? rec.amount : rec.gross} bold />
         </div>
@@ -91,10 +92,11 @@ function Slip({ rec, issuer, kind }) {
         <!-- 控除 -->
         <div class="payslip-col">
           <div class="payslip-col-head">控除</div>
-          ${(rec.health     || 0) > 0 && html`<${Row} label="健康保険" value=${rec.health} />`}
-          ${(rec.pension    || 0) > 0 && html`<${Row} label="厚生年金" value=${rec.pension} />`}
-          ${(rec.care       || 0) > 0 && html`<${Row} label="介護保険" value=${rec.care} />`}
-          ${(rec.employment || 0) > 0 && html`<${Row} label="雇用保険" value=${rec.employment} />`}
+          ${(rec.health       || 0) > 0 && html`<${Row} label="健康保険" value=${rec.health} />`}
+          ${(rec.pension      || 0) > 0 && html`<${Row} label="厚生年金" value=${rec.pension} />`}
+          ${(rec.care         || 0) > 0 && html`<${Row} label="介護保険" value=${rec.care} />`}
+          ${(rec.childSupport || 0) > 0 && html`<${Row} label="子育て支援金" value=${rec.childSupport} />`}
+          ${(rec.employment   || 0) > 0 && html`<${Row} label="雇用保険" value=${rec.employment} />`}
           <${Row} label="所得税" value=${rec.incomeTax || 0} />
           ${!isBonus && (rec.residentTax || 0) > 0 && html`
             <${Row} label="住民税" value=${rec.residentTax} />

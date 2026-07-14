@@ -8,9 +8,9 @@ import { useState, useEffect, useMemo } from 'https://esm.sh/preact@10.22.0/hook
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, useDoc, where } from '../../store.js';
 import { formatYen, thisMonth, monthLabel, addMonths, asArray } from '../../shared.js';
-import { EMP_TYPES, EMP_TYPE_MAP, DEFAULT_HEALTH_RATES, DEFAULT_EMPLOYMENT_RATES,
-         DEFAULT_CARE_RATE, PENSION_RATE } from './constants.js';
-import { calcMonthlyPaycheck } from './calc.js';
+import { EMP_TYPES, EMP_TYPE_MAP } from './constants.js';
+import { calcMonthlyPaycheck, getRatesFor } from './calc.js';
+import { taxTableLabel } from './tax-table.js';
 import { PayslipOverlay } from './payslip.js';
 
 const html = htm.bind(h);
@@ -28,21 +28,21 @@ export function MonthlyTab() {
     [month],
   );
 
+  // 料率: payrollRates（適用年月付き履歴）を最優先、旧settings→既定値へフォールバック
+  const ratesHistory  = useCollection(repos.payrollRates);
   const healthRatesQ  = useDoc(repos.settings, 'payroll_health_rates');
   const empRatesQ     = useDoc(repos.settings, 'payroll_employment_rates');
   const otherRatesQ   = useDoc(repos.settings, 'payroll_other_rates');
 
-  const rates = useMemo(() => ({
-    health: healthRatesQ.data?.rates || DEFAULT_HEALTH_RATES,
-    employmentEmployee:
-      empRatesQ.data?.employee ?? DEFAULT_EMPLOYMENT_RATES.employee,
-    employmentEmployer:
-      empRatesQ.data?.employer ?? DEFAULT_EMPLOYMENT_RATES.employer,
-    careRate:    otherRatesQ.data?.care    ?? DEFAULT_CARE_RATE,
-    pensionRate: otherRatesQ.data?.pension ?? PENSION_RATE,
-  }), [healthRatesQ.data, empRatesQ.data, otherRatesQ.data]);
+  const rates = useMemo(() => getRatesFor(month, asArray(ratesHistory.data), {
+    health: healthRatesQ.data?.rates,
+    employmentEmployee: empRatesQ.data?.employee,
+    employmentEmployer: empRatesQ.data?.employer,
+    care:    otherRatesQ.data?.care,
+    pension: otherRatesQ.data?.pension,
+  }), [month, ratesHistory.data, healthRatesQ.data, empRatesQ.data, otherRatesQ.data]);
 
-  const empList = asArray(employees.data);
+  const empList = asArray(employees.data).filter(e => !e.archived);
   const recordMap = new Map(asArray(records.data).map(r => [r.empId, r]));
 
   const selectedEmp = empList.find(e => e.id === selectedEmpId);
@@ -59,6 +59,11 @@ export function MonthlyTab() {
         </div>
         <button class="btn btn-ghost" onClick=${() => setMonth(addMonths(month, 1))}>▶</button>
         <button class="btn btn-ghost" onClick=${() => setMonth(thisMonth())}>今月</button>
+        <span style=${{ fontSize: 11, color: 'var(--text-3)' }}>
+          ${taxTableLabel(month)} · 料率: ${rates.effectiveDate
+            ? rates.effectiveDate + ' 適用分'
+            : '既定値（料率設定タブで履歴を登録できます）'}
+        </span>
 
         <div style=${{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button class="btn" onClick=${() => setShowBatchModal(true)} disabled=${empList.length === 0}>
@@ -179,12 +184,13 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
 
   // Initialize from existing record if present
   const [input, setInput] = useState(() => ({
-    basePay:     existing?.basePay     ?? (typeInfo.isSalary ? emp.monthlySalary : ''),
-    hours:       existing?.hours       ?? '',
-    commission:  existing?.commission  ?? '',
-    allowance:   existing?.allowance   ?? '',
-    deduction:   existing?.deduction   ?? '',
-    residentTax: existing?.residentTax ?? emp.residentTax ?? '',
+    basePay:     existing?.basePay      ?? (typeInfo.isSalary ? emp.monthlySalary : ''),
+    hours:       existing?.hours        ?? '',
+    commission:  existing?.commission   ?? '',
+    allowance:   existing?.allowance    ?? '',
+    deduction:   existing?.deduction    ?? '',
+    commute:     existing?.commuteTotal ?? emp.commuteAllowanceMonthly ?? '',
+    residentTax: existing?.residentTax  ?? emp.residentTax ?? '',
   }));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -193,19 +199,16 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
 
   // Compute paycheck live
   const calc = useMemo(() => calcMonthlyPaycheck(emp, {
+    month,
     basePay:     Number(input.basePay)     || 0,
     hours:       Number(input.hours)       || 0,
     commission:  Number(input.commission)  || 0,
     allowance:   Number(input.allowance)   || 0,
     deduction:   Number(input.deduction)   || 0,
+    commute:     Number(input.commute)     || 0,
     residentTax: Number(input.residentTax) || 0,
-    rates: {
-      healthRate:         rates.health?.[emp.prefecture],
-      careRate:           rates.careRate,
-      pensionRate:        rates.pensionRate,
-      employmentEmployee: rates.employmentEmployee,
-    },
-  }), [emp, input, rates]);
+    rates,
+  }), [emp, month, input, rates]);
 
   async function save() {
     setErr(null);
@@ -225,12 +228,16 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
         deduction:  calc.deduction,
         // Computed
         gross:        calc.gross,
+        commuteTotal:      calc.commuteTotal,
+        commuteNonTaxable: calc.commuteNonTaxable,
         stdRemuneration: calc.stdRemuneration,
         health:       calc.health,
         pension:      calc.pension,
         care:         calc.care,
+        childSupport: calc.childSupport,
         employment:   calc.employment,
         social:       calc.social,
+        taxable:      calc.taxable,
         incomeTax:    calc.incomeTax,
         residentTax:  calc.residentTax,
         totalDed:     calc.totalDed,
@@ -305,11 +312,19 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
                    onInput=${v => set('commission', v)} disabled=${busy} money />
           <${Field} label="諸手当" value=${input.allowance}
                    onInput=${v => set('allowance', v)} disabled=${busy} money />
+          <${Field} label="通勤手当" value=${input.commute}
+                   onInput=${v => set('commute', v)} disabled=${busy} money />
           <${Field} label="その他控除（支給側）" value=${input.deduction}
                    onInput=${v => set('deduction', v)} disabled=${busy} money />
           <${Field} label="住民税（月額）" value=${input.residentTax}
                    onInput=${v => set('residentTax', v)} disabled=${busy} money />
         </div>
+
+        ${(calc.insuranceNotes || calc.onLeave) && html`
+          <div class="note note-warn" style=${{ marginBottom: 12 }}>
+            ${calc.onLeave ? '産休・育休中: 社会保険料を免除しています。 ' : ''}${calc.insuranceNotes}
+          </div>
+        `}
 
         <!-- 結果表示 -->
         <div style=${{
@@ -321,7 +336,8 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
                            marginBottom: 6 }}>控除内訳</div>
             ${typeInfo.hasHealth && html`<${Line} label="健康保険" value=${calc.health} />`}
             ${typeInfo.hasPension && html`<${Line} label="厚生年金" value=${calc.pension} />`}
-            ${typeInfo.hasHealth && emp.careEligible && html`<${Line} label="介護保険" value=${calc.care} />`}
+            ${calc.care > 0 && html`<${Line} label="介護保険" value=${calc.care} />`}
+            ${calc.childSupport > 0 && html`<${Line} label="子育て支援金" value=${calc.childSupport} />`}
             ${typeInfo.hasEmployment && html`<${Line} label="雇用保険" value=${calc.employment} />`}
             <${Line} label="所得税" value=${calc.incomeTax} />
             <${Line} label="住民税" value=${calc.residentTax} />
@@ -425,6 +441,7 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState([]);
   const [done, setDone] = useState(false);
+  const [skipExisting, setSkipExisting] = useState(true);
 
   async function run() {
     setBusy(true);
@@ -432,32 +449,37 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
     setDone(false);
     const lines = [];
     for (const emp of employees) {
-      // Skip if already calculated, or compute from stored monthlySalary/hourlyWage
+      if (skipExisting && recordMap.has(emp.id)) {
+        lines.push(`− ${emp.name}: 計算済みのためスキップ`);
+        setLog([...lines]);
+        continue;
+      }
       const typeInfo = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
       try {
         const calc = calcMonthlyPaycheck(emp, {
+          month,
           basePay: typeInfo.isSalary ? (emp.monthlySalary || 0) : 0,
           hours: typeInfo.isSalary ? 0 : (emp.baseHours || 0),
           residentTax: emp.residentTax || 0,
-          rates: {
-            healthRate:         rates.health?.[emp.prefecture],
-            careRate:           rates.careRate,
-            pensionRate:        rates.pensionRate,
-            employmentEmployee: rates.employmentEmployee,
-          },
+          rates,
         });
         const id = `${month}_${emp.id}`;
         await repos.payrollRecords.setId(id, {
           month, empId: emp.id, empName: emp.name, empType: emp.type,
           basePay: calc.basePay, hours: Number(emp.baseHours) || 0,
           commission: 0, allowance: 0, deduction: 0,
-          gross: calc.gross, stdRemuneration: calc.stdRemuneration,
+          gross: calc.gross,
+          commuteTotal: calc.commuteTotal, commuteNonTaxable: calc.commuteNonTaxable,
+          stdRemuneration: calc.stdRemuneration,
           health: calc.health, pension: calc.pension, care: calc.care,
+          childSupport: calc.childSupport,
           employment: calc.employment, social: calc.social,
+          taxable: calc.taxable,
           incomeTax: calc.incomeTax, residentTax: calc.residentTax,
           totalDed: calc.totalDed, net: calc.net,
         });
-        lines.push(`✓ ${emp.name}: 差引 ${formatYen(calc.net)}`);
+        const warn = (!calc.residentTax && emp.type === 'executive') ? ' ⚠住民税¥0' : '';
+        lines.push(`✓ ${emp.name}: 差引 ${formatYen(calc.net)}${warn}`);
       } catch (e) {
         lines.push(`✗ ${emp.name}: ${e.message}`);
       }
@@ -478,10 +500,17 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
         </div>
         <div style=${{ padding: 20 }}>
           <div class="note note-info">
-            従業員マスタの「月給」「時給 × 月平均労働時間」をベースに自動計算します。<br>
-            歩合給・諸手当などは手動で個別調整してください。<br>
-            <strong>既存の計算結果は上書きされます。</strong>
+            従業員マスタの「月給」「時給 × 月平均労働時間」「通勤手当」をベースに自動計算します。<br>
+            歩合給・諸手当などは計算後に個別調整してください。<br>
+            役員など毎月固定の方は、これだけで計算が完了します。
           </div>
+
+          <label style=${{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                           fontSize: 13, fontWeight: 600, marginTop: 12 }}>
+            <input type="checkbox" checked=${skipExisting}
+                   onChange=${e => setSkipExisting(e.target.checked)} disabled=${busy} />
+            計算済みの従業員はスキップする（オフにすると上書き）
+          </label>
 
           ${log.length > 0 && html`
             <div style=${{

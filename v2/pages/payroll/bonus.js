@@ -8,9 +8,8 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, useDoc, where, orderBy } from '../../store.js';
 import { formatYen, thisMonth, monthLabel, addMonths, asArray } from '../../shared.js';
-import { EMP_TYPE_MAP, DEFAULT_HEALTH_RATES, DEFAULT_EMPLOYMENT_RATES,
-         DEFAULT_CARE_RATE, PENSION_RATE } from './constants.js';
-import { calcBonusPaycheck } from './calc.js';
+import { EMP_TYPE_MAP } from './constants.js';
+import { calcBonusPaycheck, getRatesFor } from './calc.js';
 import { PayslipOverlay } from './payslip.js';
 
 const html = htm.bind(h);
@@ -33,18 +32,19 @@ export function BonusTab() {
     () => [orderBy('month', 'desc')],
   );
 
+  const ratesHistory = useCollection(repos.payrollRates);
   const healthRatesQ = useDoc(repos.settings, 'payroll_health_rates');
   const empRatesQ    = useDoc(repos.settings, 'payroll_employment_rates');
   const otherRatesQ  = useDoc(repos.settings, 'payroll_other_rates');
 
-  const rates = useMemo(() => ({
-    health: healthRatesQ.data?.rates || DEFAULT_HEALTH_RATES,
-    employmentEmployee: empRatesQ.data?.employee ?? DEFAULT_EMPLOYMENT_RATES.employee,
-    careRate:    otherRatesQ.data?.care    ?? DEFAULT_CARE_RATE,
-    pensionRate: otherRatesQ.data?.pension ?? PENSION_RATE,
-  }), [healthRatesQ.data, empRatesQ.data, otherRatesQ.data]);
+  const rates = useMemo(() => getRatesFor(month, asArray(ratesHistory.data), {
+    health: healthRatesQ.data?.rates,
+    employmentEmployee: empRatesQ.data?.employee,
+    care:    otherRatesQ.data?.care,
+    pension: otherRatesQ.data?.pension,
+  }), [month, ratesHistory.data, healthRatesQ.data, empRatesQ.data, otherRatesQ.data]);
 
-  const empList = asArray(employees.data);
+  const empList = asArray(employees.data).filter(e => !e.archived);
   const bonusMap = new Map(asArray(bonuses.data).map(b => [b.empId, b]));
   // Most recent monthly record per employee (for prev-month calculation)
   const recentByEmp = useMemo(() => {
@@ -175,15 +175,11 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
   }, [recentRec]);
 
   const calc = useMemo(() => calcBonusPaycheck(emp, {
+    month,
     amount: Number(amount) || 0,
     prevMonthAfterSocial: prevAfterSocial,
-    rates: {
-      healthRate:         rates.health?.[emp.prefecture],
-      careRate:           rates.careRate,
-      pensionRate:        rates.pensionRate,
-      employmentEmployee: rates.employmentEmployee,
-    },
-  }), [emp, amount, prevAfterSocial, rates]);
+    rates,
+  }), [emp, month, amount, prevAfterSocial, rates]);
 
   async function save() {
     setErr(null);
@@ -195,6 +191,7 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
         month, empId: emp.id, empName: emp.name, empType: emp.type,
         amount: calc.amount,
         health: calc.health, pension: calc.pension, care: calc.care,
+        childSupport: calc.childSupport,
         employment: calc.employment, social: calc.social,
         incomeTax: calc.incomeTax, totalDed: calc.totalDed, net: calc.net,
         prevAfterSocial,
@@ -276,7 +273,8 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
             <div style=${{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, marginBottom: 6 }}>控除内訳</div>
             ${typeInfo.hasHealth && html`<${Line} label="健康保険" value=${calc.health} />`}
             ${typeInfo.hasPension && html`<${Line} label="厚生年金" value=${calc.pension} />`}
-            ${typeInfo.hasHealth && emp.careEligible && html`<${Line} label="介護保険" value=${calc.care} />`}
+            ${calc.care > 0 && html`<${Line} label="介護保険" value=${calc.care} />`}
+            ${calc.childSupport > 0 && html`<${Line} label="子育て支援金" value=${calc.childSupport} />`}
             ${typeInfo.hasEmployment && html`<${Line} label="雇用保険" value=${calc.employment} />`}
             <${Line} label="所得税" value=${calc.incomeTax} />
           </div>
