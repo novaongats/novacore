@@ -193,7 +193,8 @@ export function calcMonthlyPaycheck(emp, input = {}) {
   const gross = basePay + commission + allowance - deduction;
 
   // Insurance premiums
-  const stdHealth  = emp.stdRemuneration != null ? emp.stdRemuneration : getHealthStandard(basePay);
+  // 標準報酬月額: 0 または未設定は「自動計算」（employees.js は未入力を 0 で保存する）
+  const stdHealth  = Number(emp.stdRemuneration) > 0 ? Number(emp.stdRemuneration) : getHealthStandard(basePay);
   const stdPension = Math.min(stdHealth, PENSION_CAP);
 
   const healthRate     = typeInfo.hasHealth ? (rates.healthRate ?? DEFAULT_HEALTH_RATES[emp.prefecture] ?? 10.0) : 0;

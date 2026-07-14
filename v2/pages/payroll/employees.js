@@ -15,6 +15,7 @@ const html = htm.bind(h);
 const EMPTY = {
   name: '',
   nameKana: '',
+  email: '',
   type: 'regular',
   prefecture: 'aichi',
   joinDate: '',
@@ -147,6 +148,7 @@ function EmployeeModal({ initial, onClose }) {
         id: initial.id || uid('emp_'),
         name: form.name.trim(),
         nameKana: (form.nameKana || '').trim(),
+        email: (form.email || '').trim(),
         type: form.type,
         prefecture: form.prefecture,
         joinDate: form.joinDate || '',
@@ -224,6 +226,13 @@ function EmployeeModal({ initial, onClose }) {
               <input type="date" value=${form.joinDate}
                      onInput=${e => set('joinDate', e.target.value)} disabled=${busy} />
             </div>
+          </div>
+
+          <div class="field">
+            <label>メールアドレス（給与明細の送付先）</label>
+            <input type="email" value=${form.email}
+                   onInput=${e => set('email', e.target.value)} disabled=${busy}
+                   placeholder="taro@example.com" />
           </div>
 
           ${typeInfo.isSalary ? html`

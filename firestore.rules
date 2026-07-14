@@ -1,0 +1,77 @@
+rules_version = '2';
+
+// ============================================================
+// NOVA Core v2 — Firestore セキュリティルール
+//
+// 適用方法（どちらか。無料・課金なし）:
+//   A) Firebase Console → Firestore Database → ルール に全文貼付して「公開」
+//   B) firebase CLI: firebase deploy --only firestore:rules
+//
+// 方針:
+//   - ログイン必須（request.auth != null）が大前提
+//   - 給与系コレクションと settings の書込、および給与系の閲覧は
+//     admin（users/{uid}.level == 'admin'）限定
+//   - users は本人 or admin のみ。level / pages の自己変更は不可（権限昇格防止）
+//   - 注意: isAdmin() の get() は 1回の読取としてカウントされる（無料枠内で軽微）
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isAuthed() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.level == 'admin';
+    }
+
+    // ---- ユーザープロフィール ------------------------------------
+    // create: 初回ログイン時の自己シード（auth.js）を許可。
+    //         アカウント自体は admin / Console でしか作れないため安全。
+    // update: admin は全て可。本人は level / pages を変えない限り可。
+    match /users/{uid} {
+      allow read:   if isSelf(uid) || isAdmin();
+      allow create: if isSelf(uid) || isAdmin();
+      allow update: if isAdmin()
+                    || (isSelf(uid)
+                        && request.resource.data.level == resource.data.level
+                        && request.resource.data.pages == resource.data.pages);
+      allow delete: if isAdmin();
+    }
+
+    // ---- 給与系（機微情報）: 閲覧・書込とも admin 限定 -------------
+    match /payrollEmployees/{doc}    { allow read, write: if isAdmin(); }
+    match /payrollRecords/{doc}      { allow read, write: if isAdmin(); }
+    match /payrollBonus/{doc}        { allow read, write: if isAdmin(); }
+    match /payrollRates/{doc}        { allow read: if isAuthed(); allow write: if isAdmin(); }
+    match /payrollBankAccounts/{doc} { allow read, write: if isAdmin(); }
+
+    // ---- 会社共通設定: 全員読める・書込は admin ------------------
+    match /settings/{doc} {
+      allow read:  if isAuthed();
+      allow write: if isAdmin();
+    }
+
+    // ---- 業務データ: ログインユーザーなら読み書き可 ---------------
+    match /salesDepts/{doc}       { allow read, write: if isAuthed(); }
+    match /salesCategories/{doc}  { allow read, write: if isAuthed(); }
+    match /salesEntries/{doc}     { allow read, write: if isAuthed(); }
+    match /salesCosts/{doc}       { allow read, write: if isAuthed(); }
+    match /cashbook/{doc}         { allow read, write: if isAuthed(); }
+    match /cashbookAccounts/{doc} { allow read, write: if isAuthed(); }
+    match /cashbookDepts/{doc}    { allow read, write: if isAuthed(); }
+    match /invoices/{doc}         { allow read, write: if isAuthed(); }
+    match /invoiceClients/{doc}   { allow read, write: if isAuthed(); }
+    match /invoiceBanks/{doc}     { allow read, write: if isAuthed(); }
+    match /documents/{doc}        { allow read, write: if isAuthed(); }
+
+    // 上記に列挙のないコレクションはすべて拒否（デフォルト）
+  }
+}

@@ -32,28 +32,9 @@ export const storage = getStorage(app);
 
    1. Authentication → Sign-in method → Email/Password を有効化
    2. Firestore Database → データベース作成（asia-northeast1 推奨）
-   3. Firestore → ルール に以下を貼付:
-
-      rules_version = '2';
-      service cloud.firestore {
-        match /databases/{database}/documents {
-          match /{document=**} {
-            allow read, write: if request.auth != null;
-          }
-        }
-      }
-
-   4. Storage → ルールに以下を貼付:
-
-      rules_version = '2';
-      service firebase.storage {
-        match /b/{bucket}/o {
-          match /{allPaths=**} {
-            allow read, write: if request.auth != null;
-          }
-        }
-      }
-
+   3. Firestore → ルール にリポジトリルートの firestore.rules を貼付
+   4. Storage → ルール にリポジトリルートの storage.rules を貼付
    5. Authentication → Users → 管理者を1人追加
       (メール: z@novacore.local / パスワード: 任意の強固なもの)
+      → 初回ログイン時に admin プロフィールが自動作成される
    ============================================================== */
