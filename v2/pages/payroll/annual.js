@@ -2,7 +2,9 @@
    NOVA Core v2 — Payroll / Annual income management
    Detect 年収の壁 (年度対応: 〜2024=103万等 / 2025〜=123万・160万等)
    and project year-end income.
-   壁判定の年収は非課税通勤手当を除いた課税支給ベース。
+   壁判定のベースは種別で分離:
+   - 税の壁 (kind:'tax'):      gross − 非課税通勤手当（課税支給ベース）
+   - 社保の壁 (kind:'social'): 通勤手当込みの gross（報酬ベース）
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -47,7 +49,8 @@ export function AnnualTab() {
         emp: e,
         monthsWithRecord: 0,
         lastMonthNum: 0,
-        monthlyGross: 0,
+        monthlyGross: 0,      // 税ベース: gross − 非課税通勤手当
+        monthlyGrossFull: 0,  // 社保ベース: 通勤手当込みの gross
         monthlyIncomeTax: 0,
         monthlySocial: 0,
         monthlyNet: 0,
@@ -61,8 +64,10 @@ export function AnnualTab() {
       const row = m.get(r.empId);
       if (!row) continue;
       row.monthsWithRecord += 1;
-      // 壁判定の年収は非課税通勤手当を除いた課税支給ベース
+      // 税の壁は非課税通勤手当を除いた課税支給ベース、
+      // 社保の壁は通勤手当込みの総支給ベースで判定する
       row.monthlyGross     += Math.max(0, (Number(r.gross) || 0) - (Number(r.commuteNonTaxable) || 0));
+      row.monthlyGrossFull += Math.max(0, Number(r.gross) || 0);
       row.monthlyIncomeTax += Number(r.incomeTax) || 0;
       row.monthlySocial    += Number(r.social) || 0;
       row.monthlyNet       += Number(r.net) || 0;
@@ -78,14 +83,17 @@ export function AnnualTab() {
       row.bonusNet       += Number(b.net) || 0;
     }
     for (const row of m.values()) {
-      row.actualGross = row.monthlyGross + row.bonusGross;
+      row.actualGross     = row.monthlyGross + row.bonusGross;      // 税ベース
+      row.actualGrossFull = row.monthlyGrossFull + row.bonusGross;  // 社保ベース
       row.actualNet   = row.monthlyNet + row.bonusNet;
-      // 見込み = 記録がある最終月までの実績 + 残月 × 直近平均
+      // 見込み = 記録がある最終月までの実績 + 残月 × 直近平均（ベース別）
       if (row.monthsWithRecord === 0) {
-        row.projectedGross = row.actualGross;
+        row.projectedGross     = row.actualGross;
+        row.projectedGrossFull = row.actualGrossFull;
       } else {
-        const avgMonthly = row.monthlyGross / row.monthsWithRecord;
-        row.projectedGross = row.actualGross + Math.max(0, 12 - row.lastMonthNum) * avgMonthly;
+        const remain = Math.max(0, 12 - row.lastMonthNum);
+        row.projectedGross     = row.actualGross     + remain * (row.monthlyGross     / row.monthsWithRecord);
+        row.projectedGrossFull = row.actualGrossFull + remain * (row.monthlyGrossFull / row.monthsWithRecord);
       }
     }
     return m;
@@ -151,9 +159,16 @@ function WallsLegend({ walls, year }) {
             fontSize: 11, padding: '4px 10px', borderRadius: 999,
             background: 'var(--bg-alt)', color: 'var(--text-2)',
           }} title=${w.description}>
+            <span style=${{
+              fontWeight: 700,
+              color: w.kind === 'social' ? '#1e40af' : '#92400e',
+            }}>[${w.kind === 'social' ? '社保' : '税'}]</span>${' '}
             <strong>${w.label}</strong> — ${w.description}
           </div>
         `)}
+      </div>
+      <div style=${{ marginTop: 8, fontSize: 10.5, color: 'var(--text-3)' }}>
+        [税] の壁は非課税通勤手当を除いた課税支給ベース、[社保] の壁は通勤手当込みの総支給ベースで判定します。
       </div>
     </div>
   `;
@@ -162,13 +177,15 @@ function WallsLegend({ walls, year }) {
 function SummaryRow({ emp, sum, walls }) {
   if (!sum) return null;
   const type = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
-  const projected = sum.projectedGross;
-  const actual    = sum.actualGross;
+
+  // 壁ごとに判定ベースを分離: 税の壁=課税支給ベース / 社保の壁=通勤手当込み
+  const actualFor    = w => w.kind === 'social' ? sum.actualGrossFull    : sum.actualGross;
+  const projectedFor = w => w.kind === 'social' ? sum.projectedGrossFull : sum.projectedGross;
 
   // Current wall status
-  const crossedWalls = walls.filter(w => actual >= w.threshold);
-  const nextWall     = walls.find(w => actual < w.threshold);
-  const approach = nextWall && (nextWall.threshold - projected <= 100000);
+  const crossedWalls = walls.filter(w => actualFor(w) >= w.threshold);
+  const nextWall     = walls.find(w => actualFor(w) < w.threshold);
+  const approach = nextWall && (nextWall.threshold - projectedFor(nextWall) <= 100000);
 
   return html`
     <tr style=${{ borderTop: '1px solid var(--border-2)' }}>
@@ -184,15 +201,21 @@ function SummaryRow({ emp, sum, walls }) {
         ${formatYen(sum.bonusGross)}
       </td>
       <td class="num" style=${{ ...td, textAlign: 'right', fontWeight: 700 }}>
-        ${formatYen(actual)}
+        ${formatYen(sum.actualGross)}
+        <div style=${{ fontSize: 10, fontWeight: 500, color: 'var(--text-3)' }}>
+          社保ベース ${formatYen(sum.actualGrossFull)}
+        </div>
       </td>
       <td class="num" style=${{ ...td, textAlign: 'right', color: 'var(--text-2)' }}>
-        ${formatYen(projected)}
+        ${formatYen(sum.projectedGross)}
+        <div style=${{ fontSize: 10, color: 'var(--text-3)' }}>
+          社保ベース ${formatYen(sum.projectedGrossFull)}
+        </div>
       </td>
       <td style=${td}>
         ${crossedWalls.length === 0 && nextWall && html`
           <span style=${{ fontSize: 11, color: 'var(--text-3)' }}>
-            ${nextWall.label}まで残 ${formatYen(nextWall.threshold - actual)}
+            ${nextWall.label}まで残 ${formatYen(nextWall.threshold - actualFor(nextWall))}
           </span>
         `}
         ${crossedWalls.map(w => html`

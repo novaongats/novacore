@@ -8,7 +8,7 @@ import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where, limit } from '../../store.js';
 import { formatYen, uid, asArray } from '../../shared.js';
 import { EMP_TYPES, EMP_TYPE_MAP, PREFECTURES } from './constants.js';
-import { getHealthStandard, findGrade } from './calc.js';
+import { getHealthStandard, findGrade, autoStdBase } from './calc.js';
 
 const html = htm.bind(h);
 
@@ -94,7 +94,8 @@ export function EmployeesTab() {
 
 function Row({ emp, onEdit }) {
   const t = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
-  const std = emp.stdRemuneration || getHealthStandard(emp.monthlySalary || emp.hourlyWage * (emp.baseHours || 160));
+  // 自動判定は autoStdBase（基本給+通勤手当）を唯一の規範として3画面で統一
+  const std = emp.stdRemuneration || getHealthStandard(autoStdBase(emp));
   const grade = findGrade(std);
   return html`
     <div style=${{ ...tableRow, opacity: emp.archived ? 0.45 : 1 }} onClick=${onEdit}>
@@ -146,12 +147,9 @@ function EmployeeModal({ initial, onClose }) {
   const typeInfo = EMP_TYPE_MAP[form.type] || EMP_TYPE_MAP.regular;
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
-  // Auto-calc standard remuneration from salary (if not manually set)
-  const autoStd = getHealthStandard(
-    typeInfo.isSalary
-      ? Number(form.monthlySalary) || 0
-      : (Number(form.hourlyWage) || 0) * (Number(form.baseHours) || 160)
-  );
+  // Auto-calc standard remuneration (if not manually set)
+  // autoStdBase（基本給+通勤手当）で月次計算の自動判定と揃える
+  const autoStd = getHealthStandard(autoStdBase(form));
 
   async function save() {
     setErr(null);

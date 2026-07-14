@@ -463,6 +463,12 @@ export function previewImport(legacyJson) {
  * @returns {Promise<{ imported:number, skipped:number, failed:number, errors:Array }>}
  */
 export async function runImport(legacyJson, onProgress = () => {}, { merge = false } = {}) {
+  // writeBatch 直叩きのため store.js の guardWrite を通らない。
+  // デモモード中に実ログインセッションが残っていると実データへ全置換が
+  // 走り得るので、ここでも明示的にブロックする。
+  let bypass = false;
+  try { bypass = localStorage.getItem('nova_v2_dev_bypass') === '1'; } catch { /* noop */ }
+  if (bypass) throw new Error('デモモード中はインポートできません（UI確認のみ）');
   const top = unwrapLegacy(legacyJson);
 
   // Build job list, honoring priority so parents import before children.

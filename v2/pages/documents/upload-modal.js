@@ -65,6 +65,7 @@ export function UploadModal({ initial, onClose }) {
     if (!form.date) { setErr('日付は必須です'); return; }
 
     setBusy(true);
+    let uploadedNew = null; // 今回アップロードした新ファイル（upsert 失敗時のロールバック用）
     try {
       let fileUrl        = initial?.fileUrl || '';
       let storagePath    = initial?.storagePath || '';
@@ -73,10 +74,10 @@ export function UploadModal({ initial, onClose }) {
       // 差し替えは「新アップロード → doc 更新成功 → 旧削除」の順。
       // （先に旧を消すと、アップロードや保存の失敗でファイルが失われるため）
       if (newFile) {
-        const uploaded = await uploadFile(newFile, 'nova_documents', form.dept, form.type);
-        fileUrl        = uploaded.url;
-        storagePath    = uploaded.storagePath;
-        originalName   = uploaded.originalName;
+        uploadedNew = await uploadFile(newFile, 'nova_documents', form.dept, form.type);
+        fileUrl        = uploadedNew.url;
+        storagePath    = uploadedNew.storagePath;
+        originalName   = uploadedNew.originalName;
       } else if (removedFile && initial?.storagePath) {
         // ファイル明示削除: doc 更新成功後に Storage から消す
         fileUrl = storagePath = originalName = '';
@@ -111,6 +112,12 @@ export function UploadModal({ initial, onClose }) {
       onClose();
     } catch (e) {
       console.error('[documents] save failed', e);
+      // Storage 孤児防止: 新アップロード成功後に doc 保存が失敗したら
+      // アップロード済みの新ファイルを削除してロールバック（scan.js と同じ対称処理）。
+      if (uploadedNew?.storagePath) {
+        try { await deleteFile(uploadedNew.storagePath); }
+        catch (e2) { console.warn('[documents] rollback delete failed (orphan left):', uploadedNew.storagePath, e2); }
+      }
       setErr('保存に失敗: ' + (e.message || e));
       setBusy(false);
     }

@@ -11,10 +11,10 @@
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
-import { useState, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
+import { useState, useEffect, useRef } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
-import { repos, useCollection, useDoc } from '../../store.js';
-import { today, formatYen, uid, asArray } from '../../shared.js';
+import { repos, useCollection, useDoc, where } from '../../store.js';
+import { today, formatYen, uid, asArray, registerNavGuard } from '../../shared.js';
 import {
   DOC_TYPES, DOC_TYPE_MAP, TAX_TYPES, STATUSES,
   calcTotals, allocateDocNumber,
@@ -97,13 +97,33 @@ export function EditorTab({ docId, onDone, dirtyRef }) {
   const dirty = !!(form && initial &&
     JSON.stringify(stripForm(form)) !== JSON.stringify(initial));
 
+  // ナビガード（サイドバー遷移）から常に最新の dirty を読むためのミラー
+  const dirtyNowRef = useRef(false);
+
   useEffect(() => {
+    dirtyNowRef.current = dirty;
     if (dirtyRef) dirtyRef.current = dirty;
   }, [dirty, dirtyRef]);
+
+  /** 保存・破棄が確定した時点でダーティフラグを即時クリアする */
+  function clearDirty() {
+    dirtyNowRef.current = false;
+    if (dirtyRef) dirtyRef.current = false;
+  }
 
   // Reset the flag when the editor unmounts (e.g. after save/cancel).
   useEffect(() => {
     return () => { if (dirtyRef) dirtyRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // サイドバー遷移ガード: ダーティ中は confirm を挟む
+  // （既存のタブ切替ガード dirtyRef・beforeunload と共存。マウント時に登録し
+  //   アンマウント時に解除する）。
+  useEffect(() => {
+    return registerNavGuard(() =>
+      !dirtyNowRef.current
+      || confirm('編集中の書類が保存されていません。ページを離れますか？'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -250,6 +270,25 @@ export function EditorTab({ docId, onDone, dirtyRef }) {
       let docNumber = (form.docNumber || '').trim();
       if (!docNumber) {
         docNumber = await allocateDocNumber(form.type, form.issueDate);
+        // 採番成功を即フォームへ反映してから upsert する。
+        // upsert が失敗してもフォームに番号が残るため、リトライは同じ番号を
+        // 使い、採番済み番号が欠番になることを防ぐ。
+        setForm(f => ({ ...f, docNumber }));
+      } else {
+        // 手入力番号の重複チェック（警告のみ・保存はブロックしない）
+        try {
+          const dupes = (await repos.invoices.list(where('docNumber', '==', docNumber)))
+            .filter(d => d.id !== form.id);
+          if (dupes.length) {
+            const ok = confirm(
+              `書類番号「${docNumber}」は既に別の書類（${dupes.length}件）で使われています。\n` +
+              'このまま保存すると番号が重複します。保存しますか？');
+            if (!ok) { setBusy(false); return; }
+          }
+        } catch (dupErr) {
+          // チェック自体の失敗（権限・ネットワーク）では保存を妨げない
+          console.warn('[invoices] docNumber duplicate check failed', dupErr);
+        }
       }
 
       const id = form.id || uid('inv_');
@@ -265,7 +304,7 @@ export function EditorTab({ docId, onDone, dirtyRef }) {
         tax8: totals.tax8,
         totalAmount: totals.total,
       });
-      if (dirtyRef) dirtyRef.current = false;
+      clearDirty();
       onDone?.();
     } catch (e) {
       console.error('[invoices] save failed', e);
@@ -286,7 +325,7 @@ export function EditorTab({ docId, onDone, dirtyRef }) {
       setBusy(true);
       try {
         await repos.invoices.upsert({ id: form.id, status: 'void' });
-        if (dirtyRef) dirtyRef.current = false;
+        clearDirty();
         onDone?.();
       } catch (e) {
         console.error('[invoices] void failed', e);
@@ -301,7 +340,7 @@ export function EditorTab({ docId, onDone, dirtyRef }) {
     setBusy(true);
     try {
       await repos.invoices.remove(form.id);
-      if (dirtyRef) dirtyRef.current = false;
+      clearDirty();
       onDone?.();
     } catch (e) {
       console.error('[invoices] delete failed', e);
@@ -312,7 +351,7 @@ export function EditorTab({ docId, onDone, dirtyRef }) {
 
   function cancel() {
     if (dirty && !confirm('編集中の内容が保存されていません。破棄しますか？')) return;
-    if (dirtyRef) dirtyRef.current = false;
+    clearDirty();
     onDone?.();
   }
 

@@ -309,7 +309,13 @@ function EntryList({ loading, error, entries, catMap, onEdit }) {
 
   return html`
     <div>
-      ${dates.map(d => html`
+      ${dates.map(d => {
+        const dayList = byDate.get(d);
+        // 日別ヘッダーの件数・金額は売上のみ（v1移行の経費レコードは件数からも除外し
+        // 「うち経費N件」で注記 — 金額と件数の不一致を防ぐ）
+        const dayRev = dayList.filter(e => e.type !== 'expense');
+        const expCount = dayList.length - dayRev.length;
+        return html`
         <div key=${d} style=${{ marginBottom: 16 }}>
           <div style=${{
             fontSize: 12, fontWeight: 700, color: 'var(--text-3)',
@@ -317,17 +323,18 @@ function EntryList({ loading, error, entries, catMap, onEdit }) {
           }}>
             ${shortDateLabel(d)}
             <span style=${{ marginLeft: 8, color: 'var(--text-4)', fontWeight: 400 }}>
-              ${byDate.get(d).length}件 / ${formatYen(
-                sumBy(byDate.get(d).filter(e => e.type !== 'expense'), e => e.amount))}
+              ${dayRev.length}件${expCount > 0 ? `（ほか経費${expCount}件）` : ''} / ${formatYen(
+                sumBy(dayRev, e => e.amount))}
             </span>
           </div>
           <div class="card" style=${{ padding: 0, overflow: 'hidden' }}>
-            ${byDate.get(d).map(e => html`
+            ${dayList.map(e => html`
               <${EntryRow} key=${e.id} entry=${e} catMap=${catMap} onEdit=${() => onEdit(e)} />
             `)}
           </div>
         </div>
-      `)}
+      `;
+      })}
     </div>
   `;
 }

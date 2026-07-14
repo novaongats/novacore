@@ -15,7 +15,7 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, useDoc, where } from '../../store.js';
-import { dayjs, thisMonth, monthLabel, addMonths, asArray, toCsv, downloadTextFile } from '../../shared.js';
+import { thisMonth, monthLabel, addMonths, asArray, toCsv, downloadTextFile } from '../../shared.js';
 import { useDepts } from '../../depts.js';
 import { getRatesFor } from '../payroll/calc.js';
 import {
@@ -141,6 +141,28 @@ export function TaxReportPage() {
     { key: 'all', label: '全社（本部総合）' },
     ...depts.map(d => ({ key: d.key, label: d.label + (d.archived ? '（アーカイブ済）' : '') })),
   ];
+
+  // 給与系コレクション（payrollRecords/payrollBonus 等）は Firestore ルールで
+  // admin 限定。staff がこのページを開くと permission-denied になるため、
+  // その場合はページ全体を案内表示に切り替える（賃金台帳が空のまま出力されたり、
+  // 人件費抜きの損益・推移表が「正」として出力される事故を防ぐ）。
+  const isPermDenied = e => !!e && e.code === 'permission-denied';
+  const payrollDenied = [payrollQ.error, bonusQ.error, ratesQ.error, empRatesQ.error]
+    .some(isPermDenied);
+  if (payrollDenied) {
+    return html`
+      <div style=${{ maxWidth: 720 }}>
+        <div class="card" style=${{ padding: '48px 28px', textAlign: 'center' }}>
+          <div style=${{ fontSize: 34, marginBottom: 14 }}>🔒</div>
+          <div style=${{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>管理者権限が必要です</div>
+          <div style=${{ fontSize: 13, color: 'var(--text-3)', lineHeight: 1.9 }}>
+            このページの帳票には給与データ（賃金台帳・人件費）が含まれるため、<br/>
+            管理者権限が必要です。管理者アカウントでログインし直してください。
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   return html`
     <div style=${{ maxWidth: 1000 }}>

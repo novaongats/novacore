@@ -183,40 +183,45 @@ export const PENSION_CAP = 650000;
 //  - 配偶者特別控除の満額対象も160万円まで拡大
 // 社会保険側（106万・130万）は変更なし。
 
+// kind: 判定ベースの種別
+//  - 'tax'   : 税の壁 → 非課税通勤手当を除いた課税支給ベースで判定
+//  - 'social': 社会保険の壁 → 通勤手当込みの総支給ベースで判定
+//    （健康保険法上の「報酬」には通勤手当も含まれるため）
+
 /** 〜2024年分の壁（旧制度） */
 export const INCOME_WALLS = [
-  { threshold: 1030000, label: '103万円の壁',
+  { threshold: 1030000, label: '103万円の壁', kind: 'tax',
     description: '本人に所得税が発生。配偶者控除の対象外に。',
   },
-  { threshold: 1060000, label: '106万円の壁',
+  { threshold: 1060000, label: '106万円の壁', kind: 'social',
     description: '従業員51人以上企業・週20h以上で社会保険加入義務。',
   },
-  { threshold: 1300000, label: '130万円の壁',
+  { threshold: 1300000, label: '130万円の壁', kind: 'social',
     description: '社会保険の扶養から外れる。健康保険・年金を自己負担。',
   },
-  { threshold: 1500000, label: '150万円の壁',
+  { threshold: 1500000, label: '150万円の壁', kind: 'tax',
     description: '配偶者特別控除の段階的縮小開始。',
   },
-  { threshold: 2010000, label: '201万円の壁',
+  { threshold: 2010000, label: '201万円の壁', kind: 'tax',
     description: '配偶者特別控除の対象外に。',
   },
 ];
 
 /** 2025年分以降の壁（令和7年度税制改正反映） */
 export const INCOME_WALLS_2025 = [
-  { threshold: 1060000, label: '106万円の壁',
+  { threshold: 1060000, label: '106万円の壁', kind: 'social',
     description: '従業員51人以上企業・週20h以上で社会保険加入義務（変更なし）。',
   },
-  { threshold: 1230000, label: '123万円の壁',
+  { threshold: 1230000, label: '123万円の壁', kind: 'tax',
     description: '扶養控除・配偶者控除の対象外に（旧103万円の壁。令和7年改正で引上げ）。',
   },
-  { threshold: 1300000, label: '130万円の壁',
+  { threshold: 1300000, label: '130万円の壁', kind: 'social',
     description: '社会保険の扶養から外れる。健康保険・年金を自己負担（変更なし）。',
   },
-  { threshold: 1600000, label: '160万円の壁',
+  { threshold: 1600000, label: '160万円の壁', kind: 'tax',
     description: '本人に所得税が発生（基礎控除95万+給与所得控除65万）。配偶者特別控除の満額対象もここまで。',
   },
-  { threshold: 2010000, label: '201万円の壁',
+  { threshold: 2010000, label: '201万円の壁', kind: 'tax',
     description: '配偶者特別控除の対象外に。',
   },
 ];

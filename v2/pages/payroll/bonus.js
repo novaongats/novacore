@@ -60,9 +60,11 @@ export function BonusTab() {
   );
 
   // For tax rate calculation we need each employee's recent monthly record
+  // （賞与対象月より前の月のみ購読。全件購読を避ける）
   const recentMonthly = useCollection(
     repos.payrollRecords,
-    () => [orderBy('month', 'desc')],
+    () => [where('month', '<', month), orderBy('month', 'desc')],
+    [month],
   );
 
   const ratesHistory = useCollection(repos.payrollRates);
@@ -210,8 +212,9 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
     month,
     amount: Number(amount) || 0,
     prevMonthAfterSocial: prevAfterSocial,
+    hasPrevRecord: !!recentRec,  // 前月給与なし → 特殊計算（所得税法186条）
     rates,
-  }), [emp, month, amount, prevAfterSocial, rates]);
+  }), [emp, month, amount, prevAfterSocial, recentRec, rates]);
 
   async function save() {
     setErr(null);
@@ -227,6 +230,7 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
         employment: calc.employment, social: calc.social,
         incomeTax: calc.incomeTax, totalDed: calc.totalDed, net: calc.net,
         prevAfterSocial,
+        specialCalc: !!calc.specialCalc,  // 前月給与なしの特殊計算で算出したか
       });
     } catch (e) {
       console.error('[payroll/bonus] save failed', e);
@@ -287,14 +291,25 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
         }}>
           <strong>参考: 前月給与（社保控除後）</strong>
           <span class="num" style=${{ marginLeft: 8, fontWeight: 700 }}>
-            ${formatYen(prevAfterSocial)}
+            ${recentRec ? formatYen(prevAfterSocial) : 'なし'}
           </span>
           ${!recentRec && html`<span style=${{ marginLeft: 8, color: 'var(--danger)' }}>
-            (${monthLabel(month)}より前の月次給与が未計算 → 前月給与0円として税率を判定)
+            前月給与なし → 特殊計算（(賞与−社保)÷6 を月額表に適用 ×6）
           </span>`}
-          <div style=${{ marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
-            この金額と扶養人数（${emp.dependents || 0}人）で賞与所得税率が決まります。
-          </div>
+          ${recentRec ? html`
+            <div style=${{ marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
+              この金額と扶養人数（${emp.dependents || 0}人）で賞与所得税率が決まります。
+              ${recentRec.month !== addMonths(month, -1) && html`<br/>
+                ※直近の月次レコード（${monthLabel(recentRec.month)}）を「前月給与」とみなして税率を判定しています。
+              `}
+            </div>
+          ` : html`
+            <div style=${{ marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
+              前月中に給与の支払がない場合の本則（所得税法186条）: (賞与−社保)÷6 を
+              月額表（甲欄・扶養${emp.dependents || 0}人）に当てた税額 × 6 で源泉徴収します。
+              ※賞与の計算期間が6ヶ月超の場合は ÷12×12 ですが、本システムは6ヶ月以下を前提とします。
+            </div>
+          `}
         </div>
 
         <div style=${{

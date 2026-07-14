@@ -45,7 +45,7 @@ export function initDepts() {
         label: d.label || d.id,
         short: d.short || (d.label || d.id).slice(0, 2),
         color: d.color || '#64748b',
-        order: Number(d.order) || 99,
+        order: Number.isFinite(Number(d.order)) ? Number(d.order) : 99, // 0 は正当な値
         archived: !!d.archived,
       }))
       .sort((a, b) => (a.order - b.order) || a.key.localeCompare(b.key));

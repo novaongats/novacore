@@ -152,6 +152,12 @@ export function useCollection(repo, buildQuery = null, deps = []) {
   useEffect(() => {
     // デモモード: Firebase に触れず空データを即返す（UI確認のみ）。
     if (isDevBypass()) { setData([]); setError(null); return; }
+    // deps（月切替等）で再購読するとき、前クエリのデータを保持しない。
+    // 保持すると loading=false のまま前月データが1フレーム以上見え、
+    // それを useState 初期値に取り込むページ（給与計算等）が
+    // 前月値で新しい月を上書きする事故になる。
+    setData(null);
+    setError(null);
     let alive = true;
     const constraints = buildQuery ? buildQuery(repo) : [];
     const unsub = repo.subscribe(

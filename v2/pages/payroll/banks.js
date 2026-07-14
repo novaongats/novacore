@@ -32,6 +32,8 @@ const ZENGIN_MAP = {
   'バ':'ﾊﾞ','ビ':'ﾋﾞ','ブ':'ﾌﾞ','ベ':'ﾍﾞ','ボ':'ﾎﾞ',
   'パ':'ﾊﾟ','ピ':'ﾋﾟ','プ':'ﾌﾟ','ペ':'ﾍﾟ','ポ':'ﾎﾟ',
   'ヴ':'ｳﾞ',
+  'ヰ':'ｲ','ヱ':'ｴ','ヷ':'ﾜﾞ','ヺ':'ｦﾞ',
+  '゙':'ﾞ','゚':'ﾟ',  // 結合濁点 U+3099 → ﾞ / 結合半濁点 U+309A → ﾟ（NFD等で分解された文字列用）
   'ァ':'ｱ','ィ':'ｲ','ゥ':'ｳ','ェ':'ｴ','ォ':'ｵ',
   'ッ':'ﾂ','ャ':'ﾔ','ュ':'ﾕ','ョ':'ﾖ','ヮ':'ﾜ','ヵ':'ｶ','ヶ':'ｹ',
   'ー':'-','－':'-','‐':'-','―':'-','・':'.','。':'.','　':' ',
@@ -155,6 +157,11 @@ function ExportSection({ month, onChangeMonth, employees, acctMap }) {
 
   const totalAmount = pairs.reduce((s, p) => s + (p.rec?.net || 0), 0);
   const missingAcct = pairs.filter(p => !p.acct);
+  // 名義カナ未登録で漢字等のままフォールバック出力になる従業員
+  // （zenginKana 変換後も半角カナ・半角英数記号以外が残る場合のみ警告）
+  const kanaMissing = pairs.filter(p =>
+    p.acct && !(p.acct.accountHolderKana || '').trim()
+    && /[^\x20-\x7E｡-ﾟ]/.test(zenginKana(p.acct.accountHolder || '')));
 
   function exportCsv() {
     if (missingAcct.length > 0) {
@@ -231,6 +238,14 @@ function ExportSection({ month, onChangeMonth, employees, acctMap }) {
         <div class="note note-warn">
           以下の従業員の口座情報が未登録です:
           <strong>${missingAcct.map(p => p.emp.name).join('、')}</strong>
+        </div>
+      `}
+
+      ${kanaMissing.length > 0 && html`
+        <div class="note note-warn">
+          カナ未登録: <strong>${kanaMissing.map(p => p.emp.name).join('、')}</strong><br/>
+          口座名義（カナ）が未登録のため、名義が漢字のままCSVに出力されます。
+          振込データとして使用する前に、口座編集から「口座名義（カナ）」を登録してください。
         </div>
       `}
 

@@ -27,7 +27,14 @@ export function HistoryTab({ onEdit, onNew }) {
   const filtered = useMemo(() => {
     let rows = asArray(data);
     if (filterType !== 'all')   rows = rows.filter(r => r.type === filterType);
-    if (filterStatus !== 'all') rows = rows.filter(r => (r.status || 'draft') === filterStatus);
+    if (filterStatus !== 'all') {
+      rows = rows.filter(r => {
+        const s = r.status || 'draft';
+        // 「取消」フィルタは旧データの 'cancelled' も拾う（'void' と同義）
+        if (filterStatus === 'void') return s === 'void' || s === 'cancelled';
+        return s === filterStatus;
+      });
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       rows = rows.filter(r =>

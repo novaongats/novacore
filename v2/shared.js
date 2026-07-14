@@ -180,6 +180,24 @@ export function groupBy(arr, keyFn) {
 /** Defensive: always return array. */
 export function asArray(v) { return Array.isArray(v) ? v : []; }
 
+// ---- ページ離脱ガード --------------------------------------------------------
+// 編集中フォームを持つページが登録し、サイドバー遷移時に app.js が確認する。
+// guard は「離脱してよければ true」を返す（内部で confirm してよい）。
+
+const _navGuards = new Set();
+
+export function registerNavGuard(guard) {
+  _navGuards.add(guard);
+  return () => _navGuards.delete(guard);
+}
+
+export function confirmNavAway() {
+  for (const g of _navGuards) {
+    try { if (!g()) return false; } catch { /* ガード側の例外で遷移を塞がない */ }
+  }
+  return true;
+}
+
 // ---- CSV -------------------------------------------------------------------
 
 /**

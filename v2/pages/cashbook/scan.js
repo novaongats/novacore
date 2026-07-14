@@ -12,6 +12,7 @@ import { getClaudeApiKey } from '../settings.js';
 import {
   formatYen, today, uid, asArray,
 } from '../../shared.js';
+import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
 
@@ -28,6 +29,8 @@ const THRESHOLD_LS_KEY = 'nova_v2_scan_threshold';
 export function ScanTab() {
   const accounts = useCollection(repos.cashbookAccounts);
   const depts    = useCollection(repos.cashbookDepts);
+  // 事業部門（salesDepts のキー）— 税理士書類の部門別集計用（ledger.js と同じ扱い）
+  const bizDepts = useDepts();
 
   const [files, setFiles]       = useState([]);   // [{ id, file, previewUrl }]
   const [results, setResults]   = useState([]);   // [{ id, file, previewUrl, data, form, status, error? }]
@@ -124,6 +127,14 @@ export function ScanTab() {
     if (!files.length) return;
 
     setErr(null);
+    // 再解析: 旧 results のうち files 側から参照されていない previewUrl は
+    // ここで revoke しないとリークする（× でファイルだけ外したケース）。
+    {
+      const fileUrls = new Set(filesRef.current.map(f => f.previewUrl));
+      for (const r of resultsRef.current) {
+        if (r.previewUrl && !fileUrls.has(r.previewUrl)) URL.revokeObjectURL(r.previewUrl);
+      }
+    }
     setResultsSync([]);
     const acctNames = asArray(accounts.data).map(a => a.name);
     const deptNames = asArray(depts.data).map(d => d.name);
@@ -198,6 +209,7 @@ export function ScanTab() {
         vendor: r.form.vendor.trim(),
         category: r.form.category,
         dept: r.form.dept,
+        deptKey: r.form.deptKey || '', // salesDepts のキー（税理士書類の部門別集計用・任意）
         amount: Math.round(Number(r.form.amount)) || 0,
         reducedTax: !!r.form.reducedTax,
         hasInvoice: !!r.form.hasInvoice,
@@ -250,7 +262,7 @@ export function ScanTab() {
       <${DropZone} onFiles=${addFiles} />
 
       ${files.length > 0 && html`
-        <${FileList} files=${files} onRemove=${removeFile} />
+        <${FileList} files=${files} onRemove=${removeFile} disabled=${!!progress} />
         <div style=${{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button class="btn" onClick=${analyzeAll} disabled=${!apiKey || !!progress || !files.length}>
             🤖 AI解析開始 (${files.length}枚)
@@ -292,7 +304,7 @@ export function ScanTab() {
                                textAlign: 'center', fontFamily: 'var(--font-num)' }} />%
             </label>
             ${autoCount > 0 && html`
-              <button class="btn" onClick=${registerAutoEligible}>
+              <button class="btn" onClick=${registerAutoEligible} disabled=${!!progress}>
                 ✓ 自動登録 (${autoCount}件)
               </button>
             `}
@@ -320,7 +332,9 @@ export function ScanTab() {
             result=${r}
             accounts=${asArray(accounts.data)}
             depts=${asArray(depts.data)}
+            bizDepts=${bizDepts}
             threshold=${threshold}
+            analyzing=${!!progress}
             onFormChange=${(patch) => updateForm(r.id, patch)}
             onRegister=${() => registerOne(r.id)}
             onRemove=${() => removeResult(r.id)}
@@ -401,7 +415,7 @@ function DropZone({ onFiles }) {
 
 // ---- Selected file list ----------------------------------------------------
 
-function FileList({ files, onRemove }) {
+function FileList({ files, onRemove, disabled }) {
   return html`
     <div style=${{ marginTop: 14 }}>
       <div style=${{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, marginBottom: 8 }}>
@@ -422,11 +436,15 @@ function FileList({ files, onRemove }) {
                           style=${{ width: '100%', height: '100%', objectFit: 'cover' }} />`
               : html`<div style=${{ fontSize: 28 }}>📄</div>`}
             <button onClick=${(e) => { e.stopPropagation(); onRemove(item.id); }}
+                    disabled=${disabled}
+                    title=${disabled ? '解析中は削除できません' : ''}
                     style=${{
                       position: 'absolute', top: 2, right: 2,
                       width: 20, height: 20, borderRadius: '50%',
-                      background: 'rgba(220,38,38,0.85)', color: '#fff',
-                      border: 'none', cursor: 'pointer', fontSize: 12, lineHeight: 1,
+                      background: disabled ? 'rgba(148,163,184,0.7)' : 'rgba(220,38,38,0.85)',
+                      color: '#fff',
+                      border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+                      fontSize: 12, lineHeight: 1,
                     }}>×</button>
           </div>
         `)}
@@ -437,7 +455,7 @@ function FileList({ files, onRemove }) {
 
 // ---- Result card (review & register) ---------------------------------------
 
-function ResultCard({ result, accounts, depts, threshold, onFormChange, onRegister, onRemove }) {
+function ResultCard({ result, accounts, depts, bizDepts, threshold, analyzing, onFormChange, onRegister, onRemove }) {
   if (result.status === 'error') {
     return html`
       <div class="card" style=${{
@@ -447,7 +465,8 @@ function ResultCard({ result, accounts, depts, threshold, onFormChange, onRegist
         <div class="note note-err" style=${{ marginTop: 8 }}>
           解析失敗: ${result.error}
         </div>
-        <button class="btn btn-ghost" onClick=${onRemove} style=${{ marginTop: 8 }}>削除</button>
+        <button class="btn btn-ghost" onClick=${onRemove} disabled=${analyzing}
+                style=${{ marginTop: 8 }}>削除</button>
       </div>
     `;
   }
@@ -503,12 +522,15 @@ function ResultCard({ result, accounts, depts, threshold, onFormChange, onRegist
               }}>信頼度 ${conf}%</span>
               ${isHigh && html`<span style=${{ fontSize: 11, color: 'var(--success)' }}>→ 自動登録対象</span>`}
             </div>
+            ${/* 解析実行中は登録・破棄とも disabled（解析ループの setResultsSync が
+                  ローカル配列で上書きするため、途中の削除/登録が巻き戻って壊れる） */ ''}
             <div style=${{ display: 'flex', gap: 6 }}>
-              <button class="btn" onClick=${onRegister} disabled=${result.status !== 'ready'}
+              <button class="btn" onClick=${onRegister}
+                      disabled=${result.status !== 'ready' || analyzing}
                       style=${{ background: 'var(--success)', boxShadow: '0 1px 3px rgba(16,185,129,0.25)' }}>
                 ✓ 登録
               </button>
-              <button class="btn btn-ghost" onClick=${onRemove}>破棄</button>
+              <button class="btn btn-ghost" onClick=${onRemove} disabled=${analyzing}>破棄</button>
             </div>
           </div>
 
@@ -534,12 +556,20 @@ function ResultCard({ result, accounts, depts, threshold, onFormChange, onRegist
                      rightAlign />
           </div>
           <div style=${{
-            display: 'grid', gridTemplateColumns: '1fr 1fr auto auto',
+            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto auto',
             gap: 8, marginTop: 8, alignItems: 'center',
           }}>
             <${FieldSelect} label="部門" value=${result.form.dept}
                            options=${[{ value: '', label: '--' }, ...depts.map(d => ({ value: d.name, label: d.name }))]}
                            onInput=${v => onFormChange({ dept: v })} />
+            <${FieldSelect} label="事業部門（税理士集計用）" value=${result.form.deptKey || ''}
+                           options=${[
+                             { value: '', label: '--' },
+                             ...bizDepts
+                               .filter(d => !d.archived || d.key === result.form.deptKey)
+                               .map(d => ({ value: d.key, label: d.label + (d.archived ? '（アーカイブ済）' : '') })),
+                           ]}
+                           onInput=${v => onFormChange({ deptKey: v })} />
             <${Field} label="メモ" value=${result.form.memo}
                      onInput=${v => onFormChange({ memo: v })} />
             <label style=${checkLabel}>
@@ -693,6 +723,7 @@ function normalizeResult(parsed, accountNames, deptNames) {
     vendor: parsed?.vendor || '',
     category,
     dept,
+    deptKey: '', // 事業部門は AI 推定しない（登録カードで手動選択）
     amount: Number(parsed?.amount || 0),
     reducedTax: parsed?.tax_rate === 8 || !!parsed?.reduced_tax,
     hasInvoice: !!parsed?.has_invoice,

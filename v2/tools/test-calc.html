@@ -28,10 +28,12 @@ import {
   getHealthStandard, snapToStandard, roundShakai,
   splitCommuteAllowance, carCommuteCap, getInsuranceStatus,
   calcHealthPremium, calcPensionPremium, calcChildSupportPremium,
+  autoStdBase,
 } from '../pages/payroll/calc.js';
 import { calcIncomeTaxForMonth, getBonusTaxRateForMonth } from '../pages/payroll/tax-table.js';
 import { salaryIncomeDeduction, basicDeduction, calcAnnualTax } from '../pages/payroll/year-end.js';
 import { prevMonthTaxBasis, pickPrevMonthRecords } from '../pages/payroll/bonus.js';
+import { zenginKana } from '../pages/payroll/banks.js';
 import { getIncomeWalls } from '../pages/payroll/constants.js';
 
 const out = document.getElementById('out');
@@ -173,6 +175,34 @@ eq('賞与: 所得税', b1.incomeTax, Math.floor((500000 - 73450) * 0.04084));
 eq('賞与: 1000円未満切捨て (500,999円→標準賞与50万)',
    calcBonusPaycheck(emp1, { month: '2026-07', amount: 500999, prevMonthAfterSocial: 255930, rates: rates8 }).health,
    24625);
+eq('賞与: 前月レコードあり → 率方式（specialCalc=false）', b1.specialCalc, false);
+
+// ---- 前月給与なしの特殊計算（所得税法186条: (賞与−社保)÷6 を月額表適用 ×6） ----
+// 手検算1（令和8年電算機特例・アルバイト=社保なし・扶養0・賞与180万）:
+//   (1,800,000 − 0) ÷ 6 = 300,000
+//   給与所得控除月割 ceil(300,000×0.20+36,667)=96,667 / 基礎控除月割 48,334
+//   B = 300,000−96,667−48,334 = 154,999 → 154,999×5.105% = 7,912.699 → 10円未満四捨五入 7,910
+//   賞与源泉 = 7,910 × 6 = 47,460
+const empNoIns = { type: 'arbeit', dependents: 0 };
+const bs1 = calcBonusPaycheck(empNoIns, {
+  month: '2026-07', amount: 1800000, prevMonthAfterSocial: 0, hasPrevRecord: false, rates: rates8,
+});
+eq('賞与特殊計算: 前月なし・180万・扶養0（2026-07）', bs1.incomeTax, 47460);
+eq('賞与特殊計算: specialCalc フラグ', bs1.specialCalc, true);
+// 手検算2（令和6年月額表・アルバイト・扶養1・賞与120万）:
+//   1,200,000 ÷ 6 = 200,000 → 月額表（〜200,000円・扶養1人）= 1,920 → ×6 = 11,520
+const bs2 = calcBonusPaycheck({ type: 'arbeit', dependents: 1 }, {
+  month: '2025-07', amount: 1200000, prevMonthAfterSocial: 0, hasPrevRecord: false, rates: rates8,
+});
+eq('賞与特殊計算: 前月なし・120万・扶養1（2025-07 旧月額表）', bs2.incomeTax, 11520);
+// 手検算3（社保あり・正社員東京・扶養0・賞与50万・前月なし）:
+//   社保 = 24,625+45,750+575+2,500 = 73,450 → (500,000−73,450)÷6 = 71,091（円未満切捨て）
+//   71,091 ≤ 158,333 → 控除計 54,167+48,334 > 71,091 → B=0 → 税額0 → ×6 = 0
+const bs3 = calcBonusPaycheck(emp1, {
+  month: '2026-07', amount: 500000, prevMonthAfterSocial: 0, hasPrevRecord: false, rates: rates8,
+});
+eq('賞与特殊計算: 低額賞与は月額換算で非課税ライン以下 → 0円', bs3.incomeTax, 0);
+eq('賞与特殊計算: 社保は通常どおり控除', bs3.social, 73450);
 
 // ============ 10. 年末調整: 年度別パラメータ（令和7年度税制改正） ============
 section('10. 年末調整: 給与所得控除・基礎控除の年度切替（令和7年度税制改正）');
@@ -194,8 +224,18 @@ eq('基礎控除 所得132万超 (2027→上乗せ終了で58万)', basicDeducti
 eq('基礎控除 所得132万以下 (2027→95万は恒久)', basicDeduction(1320000, 2027), 950000);
 eq('基礎控除 (2024→旧48万)', basicDeduction(5000000, 2024), 480000);
 // 年税額 end-to-end（年収300万・社保44万・扶養1人）
-eq('年税額 2025年分（基礎控除88万）', calcAnnualTax(3000000, 440000, 1, 2025).totalTax, 16336);
-eq('年税額 2024年分（基礎控除48万）', calcAnnualTax(3000000, 440000, 1, 2024).totalTax, 36756);
+// 法定手順の手検算:
+//   2025年分: 給与所得控除 300万×0.3+8万=98万 → 給与所得202万
+//     課税所得 = 202万−44万−基礎88万−扶養38万 = 32万（1,000円未満切捨て後も32万）
+//     算出所得税 32万×5% = 16,000 → 年調年税額 16,000×102.1% = 16,336 → 100円未満切捨て = 16,300
+eq('年税額 2025年分（102.1%の100円未満切捨て）', calcAnnualTax(3000000, 440000, 1, 2025).totalTax, 16300);
+//   2024年分: 課税所得 = 202万−44万−基礎48万−扶養38万 = 72万
+//     算出所得税 72万×5% = 36,000 → 36,000×102.1% = 36,756 → 100円未満切捨て = 36,700
+eq('年税額 2024年分（基礎控除48万）', calcAnnualTax(3000000, 440000, 1, 2024).totalTax, 36700);
+//   課税所得の1,000円未満切捨て: 社保440,500円 → 課税所得319,500 → 319,000
+//     算出所得税 319,000×5% = 15,950 → ×102.1% = 16,284.95 → 100円未満切捨て = 16,200
+eq('課税所得の1,000円未満切捨て', calcAnnualTax(3000000, 440500, 1, 2025).taxable, 319000);
+eq('年税額（両端数処理の複合）', calcAnnualTax(3000000, 440500, 1, 2025).totalTax, 16200);
 
 // ============ 11. 賞与: 前月給与の参照と課税ベース ============
 section('11. 賞与: 前月レコードの選択と税率基礎額');
@@ -241,6 +281,23 @@ const c5 = calcMonthlyPaycheck(emp2, { month: '2026-07', rates: rates8 });
 eq('標準報酬の自動判定は通勤手当込み（30万+1.5万→標報32万）', c5.stdRemuneration, 320000);
 const c6 = calcMonthlyPaycheck(emp1, { month: '2026-07', allowance: 20000, rates: rates8 });
 eq('標準報酬の自動判定は諸手当込み（30万+2万→標報32万）', c6.stdRemuneration, 320000);
+
+// ============ 14. 標準報酬「自動」基準の統一ヘルパー ============
+section('14. autoStdBase: 標準報酬の自動判定基準（3画面統一）');
+eq('月給30万+通勤1.5万 → 31.5万', autoStdBase({ type: 'regular', monthlySalary: 300000, commuteAllowanceMonthly: 15000 }), 315000);
+eq('時給1,200×基準時間未設定(160h既定) → 19.2万', autoStdBase({ type: 'arbeit', hourlyWage: 1200 }), 192000);
+eq('時給1,200×100h+通勤5,000 → 12.5万', autoStdBase({ type: 'arbeit', hourlyWage: 1200, baseHours: 100, commuteAllowanceMonthly: 5000 }), 125000);
+eq('等級化はcalc.jsの自動判定と一致（月給30万+通勤1.5万→標報32万）',
+   getHealthStandard(autoStdBase({ type: 'regular', monthlySalary: 300000, commuteAllowanceMonthly: 15000 })),
+   calcMonthlyPaycheck({ ...emp2 }, { month: '2026-07', rates: rates8 }).stdRemuneration);
+
+// ============ 15. 全銀カナ正規化 ============
+section('15. zenginKana: 全銀フォーマット向けカナ正規化');
+eq('ひらがな→半角カナ', zenginKana('やまだ たろう'), 'ﾔﾏﾀﾞ ﾀﾛｳ');
+eq('ヰ・ヱ・ヺの変換', zenginKana('ヰヱヺ'), 'ｲｴｦﾞ');
+eq('ゐ・ゑ（ひらがな経由）', zenginKana('ゐゑ'), 'ｲｴ');
+eq('結合濁点 U+3099', zenginKana('ガ'), 'ｶﾞ');
+eq('結合半濁点 U+309A', zenginKana('パ'), 'ﾊﾟ');
 
 // ============ 結果 ============
 const sum = document.createElement('div');

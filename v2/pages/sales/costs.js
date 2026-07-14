@@ -56,6 +56,9 @@ export function CostsTab() {
       });
     }
     for (const e of asArray(entries.data)) {
+      // v1移行の type:'expense' レコードは売上ではないため除外
+      // （レベシェア外注費の計算基数に経費が混入するのを防ぐ）
+      if (e.type === 'expense') continue;
       const row = m.get(e.catId);
       if (row) row.revenue += Number(e.amount || 0);
     }

@@ -80,7 +80,10 @@ function fmtDate(d) {
     `${m}/${dd}`);
 }
 
-/** レベシェアの自動外注費: カテゴリ×月売上から算出 */
+/** v1移行の手入力経費レコード（salesEntries の type:'expense'）か */
+function isLegacyExpense(e) { return e.type === 'expense'; }
+
+/** レベシェアの自動外注費: カテゴリ×月売上から算出（経費レコードは基数に含めない） */
 function revShareRows(entries, cats, scope, catMap) {
   const rows = [];
   for (const cat of cats) {
@@ -88,7 +91,7 @@ function revShareRows(entries, cats, scope, catMap) {
     if (scope !== 'all' && (cat.dept || 'other') !== scope) continue;
     const pct = Math.max(0, Math.min(100, Number(cat.revShare.companyPct) || 0));
     const rev = entries
-      .filter(e => e.catId === cat.id)
+      .filter(e => e.catId === cat.id && !isLegacyExpense(e))
       .reduce((s, e) => s + (Number(e.amount) || 0), 0);
     const outsource = Math.round(rev * (100 - pct) / 100);
     if (outsource > 0) rows.push({ cat, outsource, pct });
@@ -104,11 +107,16 @@ export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, p
   const catMap = new Map(cats.map(c => [c.id, c]));
   const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
 
+  // v1移行の type:'expense' レコードは売上に合算せず、経費側に計上する
+  // （home.js の legacyExpense と同じ扱い — ホームの営業利益と一致させる）
+  const legacyExpense = sumBy(
+    entries.filter(e => isLegacyExpense(e) && inScope(e)), e => e.amount);
+
   // --- 売上（部門別） ---
   const revByDept = {};
   let totalRevenue = 0;
   for (const e of entries) {
-    if (!inScope(e)) continue;
+    if (!inScope(e) || isLegacyExpense(e)) continue;
     const d = entryDept(e, catMap);
     const v = Number(e.amount) || 0;
     revByDept[d] = (revByDept[d] || 0) + v;
@@ -129,6 +137,7 @@ export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, p
     if (!cashbookInScope(e, scope, depts)) continue;
     add(e.category || 'その他（現金）', Number(e.amount) || 0);
   }
+  add('移行経費（v1手入力）', legacyExpense);
 
   // --- 人件費（全社スコープのみ。部門配賦は行っていない） ---
   let payrollGross = 0, employerSocial = 0;
@@ -187,7 +196,7 @@ export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, p
           cols: [{ label: '項目' }, { label: '金額', align: 'right' }],
           rows: [
             ['売上高', yen(totalRevenue)],
-            ['経費合計', '△ ' + yen(totalCost).replace('¥', '¥')],
+            ['経費合計', '△ ' + yen(totalCost)],
           ],
           total: ['営業利益', yen(profit)],
         },
@@ -198,6 +207,9 @@ export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, p
         ? '人件費（給料・賞与、法定福利費）は全社一括計上（部門配賦なし）。法定福利費は事業主負担の概算値。'
         : '部門別表示では人件費（給料・賞与）を含みません（全社集計でのみ計上）。',
       '経費は「月次コスト（事業別）」「現金出納帳」「レベニューシェア外注費（自動計算）」の合算。',
+      legacyExpense
+        ? 'v1から移行した手入力経費レコードは「移行経費（v1手入力）」として経費に計上しています（売上には含まれません）。'
+        : null,
       '金額はすべて税込。',
       cashbookUnmatchedFootnote(scope, cashbook, depts),
     ].filter(Boolean),
@@ -227,8 +239,10 @@ export function buildSalesLedger({ month, scope, depts, cats, entries }) {
   const catMap = new Map(cats.map(c => [c.id, c]));
   const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
 
+  // v1移行の経費レコードは売上帳の明細から除外（脚注で注記）
+  const excluded = entries.filter(e => isLegacyExpense(e) && inScope(e));
   const list = entries
-    .filter(inScope)
+    .filter(e => inScope(e) && !isLegacyExpense(e))
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   const rows = list.map(e => {
@@ -260,7 +274,12 @@ export function buildSalesLedger({ month, scope, depts, cats, entries }) {
         total: ['', '', '', `合計（${list.length}件）`, yen(total)],
       },
     }],
-    footnotes: ['金額は税込。売上入力（日次売上）の登録データに基づく。'],
+    footnotes: [
+      '金額は税込。売上入力（日次売上）の登録データに基づく。',
+      excluded.length
+        ? `v1移行の経費レコード ${excluded.length}件（${yen(sumBy(excluded, e => e.amount))}）は売上ではないため本表から除外しています（損益サマリーの「移行経費（v1手入力）」に計上）。`
+        : null,
+    ].filter(Boolean),
   };
 }
 
@@ -411,8 +430,10 @@ export function buildTaxSummary({ month, scope, depts, cats, entries, costs, cas
   const catMap = new Map(cats.map(c => [c.id, c]));
   const inScope = e => scope === 'all' || entryDept(e, catMap) === scope;
 
-  // 売上側（税込→内税を概算）
-  const sales = sumBy(entries.filter(inScope), e => e.amount);
+  // 売上側（税込→内税を概算）。v1移行の経費レコードは売上ではないため仮受から除外。
+  // 税区分が不明のため課税仕入（仮払）側にも入れず「対象外」として脚注する。
+  const legacyExpList = entries.filter(e => isLegacyExpense(e) && inScope(e));
+  const sales = sumBy(entries.filter(e => inScope(e) && !isLegacyExpense(e)), e => e.amount);
   const recvTax = Math.round(sales * 10 / 110);
 
   // 請求書ベース（発行済・入金済のみ、参考値）
@@ -501,6 +522,9 @@ export function buildTaxSummary({ month, scope, depts, cats, entries, costs, cas
       '売上・月次コストは標準税率10%の内税として換算。',
       '月次コストのうち非課税・不課税科目（給料・賞与、人件費、保険料、法定福利費、減価償却費）は「課税仕入対象外」として仮払消費税の計算から除外しています。',
       '仕入税額控除の適用可否（インボイス制度・経過措置）は「適格請求書あり」の区分を参照してください。',
+      legacyExpList.length
+        ? `v1移行の経費レコード ${legacyExpList.length}件（${yen(sumBy(legacyExpList, e => e.amount))}）は税区分が不明なため本表の対象外です（仮受・仮払のいずれにも含まれません）。`
+        : null,
       cashbookUnmatchedFootnote(scope, cashbook, depts),
     ].filter(Boolean),
   };
@@ -618,7 +642,6 @@ export function buildWageLedger({ month, depts, payroll, bonus, employees, rates
 // ============================================================
 
 export function buildInvoiceList({ month, invoices }) {
-  const monthStart = month + '-01';
   const list = invoices
     .filter(i => (i.issueDate || '').startsWith(month))
     .sort((a, b) => (a.issueDate || '').localeCompare(b.issueDate || ''));
@@ -632,7 +655,8 @@ export function buildInvoiceList({ month, invoices }) {
     yen(i.totalAmount),
   ]);
 
-  const active = list.filter(i => i.status !== 'cancelled' && i.status !== 'draft');
+  // 'void' は現行の取消ステータス、'cancelled' は旧データ互換（STATUS_MAP 参照）
+  const active = list.filter(i => !['cancelled', 'void', 'draft'].includes(i.status || 'draft'));
   const total = sumBy(active, i => i.totalAmount);
   const paid = sumBy(active.filter(i => i.status === 'paid'), i => i.totalAmount);
 
@@ -681,9 +705,13 @@ export function buildTrend({ month, scope, depts, cats, allEntries, allCosts, al
   const per = {};
   for (const m of months) per[m] = { revenue: 0, cost: 0, payroll: 0 };
 
+  let hasLegacyExpense = false;
   for (const e of allEntries) {
     const m = (e.date || '').slice(0, 7);
-    if (per[m] && inScope(e)) per[m].revenue += Number(e.amount) || 0;
+    if (!per[m] || !inScope(e)) continue;
+    // v1移行の経費レコードは売上ではなく費用へ（home.js / PL と同じ扱い）
+    if (isLegacyExpense(e)) { per[m].cost += Number(e.amount) || 0; hasLegacyExpense = true; }
+    else per[m].revenue += Number(e.amount) || 0;
   }
   for (const sc of allCosts) {
     const cat = catMap.get(sc.catId);
@@ -741,9 +769,14 @@ export function buildTrend({ month, scope, depts, cats, allEntries, allCosts, al
       },
     }],
     footnotes: [
-      '経費 = 月次コスト + 現金出納帳 + レベニューシェア外注費。',
+      hasLegacyExpense
+        ? '経費 = 月次コスト + 現金出納帳 + レベニューシェア外注費 + v1移行の手入力経費。'
+        : '経費 = 月次コスト + 現金出納帳 + レベニューシェア外注費。',
       scope === 'all' ? '人件費 = 給与・賞与の額面（法定福利費は含まない）。' : '部門別表示では人件費を含みません。',
-    ],
+      // 部門スコープの注記は他書類と一貫させる（対象期間内の現金出納帳のみで判定）
+      cashbookUnmatchedFootnote(scope,
+        allCashbook.filter(e => per[(e.date || '').slice(0, 7)]), depts),
+    ].filter(Boolean),
   };
 }
 

@@ -36,8 +36,8 @@ STATUS_MAP.cancelled = STATUS_MAP.void;
  *
  * インボイス制度（適格請求書）要件:
  *   消費税の端数処理は「税率ごとに1回」だけ行う（明細行ごとの丸め合算は不可）。
- *   端数処理の方法は事業者の任意選択だが、本システムは【切捨て(Math.floor)】を
- *   既定とし固定する。
+ *   端数処理の方法は事業者の任意選択だが、本システムは【ゼロ方向への切捨て
+ *   (Math.trunc)】を既定とし固定する（負のバケットでも絶対値切捨て）。
  *
  * Returns（後方互換: subtotal / tax10 / tax8 / taxAmount / total は従来通り）:
  *   {
@@ -77,14 +77,29 @@ export function calcTotals(items) {
   const byRate = {};
   let subtotal = 0, taxAmount = 0, total = 0;
 
+  // 端数処理は「ゼロ方向への切捨て」（Math.trunc）で統一する。
+  // Math.floor は負のバケット（値引き超過）で絶対値が切り上がってしまう
+  // （floor(-10.5) = -11）ため使わない。trunc(-10.5) = -10。
+  const truncTowardZero = Math.trunc;
+
   for (const rateKey of ['10', '8', '0']) {
     const { excl, incl } = buckets[rateKey];
     const r = Number(rateKey);
-    // 端数処理はここで税率ごとに1回だけ（切捨て）
-    const taxFromExcl = r ? Math.floor(excl * r / 100) : 0;
-    const taxFromIncl = r ? Math.floor(incl * r / (100 + r)) : 0;
-    const tax   = taxFromExcl + taxFromIncl;
-    const net   = excl + (incl - taxFromIncl);
+    // 税額の端数処理は税率ごとに【1回だけ】:
+    // 税抜行・税込行それぞれの理論税額（浮動小数点）を合算してから切り捨てる。
+    // 行種別ごとに2回 floor すると、切捨てが2回入り実装上1円少なくなり得る。
+    //   検算例 (r=10):
+    //     excl=505（理論税 50.5）+ incl=215（理論税 215×10/110 = 19.5454…）
+    //     → 合算 70.045… → tax = 70
+    //     （旧実装: floor(50.5)+floor(19.545…) = 50+19 = 69 と1円差）
+    //   純粋な税込のみ / 税抜のみのケースは従来と同値:
+    //     excl=1000 のみ → trunc(100.0) = 100 / incl=1100 のみ → trunc(100.0) = 100
+    const inclTaxExact = r ? incl * r / (100 + r) : 0;
+    const exclTaxExact = r ? excl * r / 100 : 0;
+    const tax = r ? truncTowardZero(exclTaxExact + inclTaxExact) : 0;
+    // net（税抜換算の表示値）は税込行の内税分を控除して算出。
+    // ここでの trunc は表示用の税抜換算であり、税額の丸めは上の1回のみ。
+    const net   = excl + (incl - truncTowardZero(inclTaxExact));
     const gross = net + tax;
     byRate[rateKey] = { net, tax, gross };
     subtotal  += net;

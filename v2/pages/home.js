@@ -142,7 +142,7 @@ export function HomePage({ user }) {
                sub=${stats.prevRevenue > 0 ? `前月 ${formatYen(stats.prevRevenue)}` : ''}
                accent="primary" icon="▲" />
         <${Kpi} label="当月コスト（全社）" value=${formatYen(stats.totalCost)}
-               sub=${`月次コスト ${formatYen(stats.deptCost)} ＋ 現金出納帳 ${formatYen(stats.cashCost)}`}
+               sub=${`部門コスト ${formatYen(stats.deptCost)} ＋ 現金出納帳 ${formatYen(stats.cashCost)}`}
                accent="danger"  icon="━" />
         <${Kpi} label="営業利益"     value=${formatYen(stats.profit)}
                accent=${stats.profit >= 0 ? 'success' : 'danger'} icon="◆" />

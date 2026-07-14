@@ -103,13 +103,17 @@ export function calcAnnualTax(annualGross, annualSocial, dependents, year) {
   const income   = annualGross - salDed;               // 給与所得
   const basic    = basicDeduction(income, year);
   const depDed   = dependentDeduction(dependents);
-  const taxable  = Math.max(0, income - annualSocial - basic - depDed);
+  // 課税給与所得金額: 1,000円未満切捨て（年末調整の法定端数処理）
+  const taxable  = Math.floor(Math.max(0, income - annualSocial - basic - depDed) / 1000) * 1000;
   const baseTax  = progressiveIncomeTax(taxable);
-  const reconstructionTax = Math.round(baseTax * 0.021);  // 復興特別所得税
+  // 年調年税額 = 算出所得税額 × 102.1%（復興特別所得税込み）の100円未満切捨て
+  // baseTax × 1021 は整数演算なので浮動小数点誤差なし
+  const totalTax = Math.floor(baseTax * 1021 / 100000) * 100;
+  const reconstructionTax = totalTax - baseTax;  // 復興特別所得税相当（100円未満切捨て後の差分）
   return {
     salDed, income, basic, depDed,
     taxable, baseTax, reconstructionTax,
-    totalTax: baseTax + reconstructionTax,
+    totalTax,
   };
 }
 
@@ -145,6 +149,7 @@ export function YearEndTab() {
       m.set(e.id, {
         emp: e,
         monthsCount: 0,
+        legacyMonths: 0,
         annualGross: 0,
         annualSocial: 0,
         annualWithheld: 0,
@@ -154,6 +159,9 @@ export function YearEndTab() {
       const row = m.get(r.empId);
       if (!row) continue;
       row.monthsCount  += 1;
+      // 移行データ（commuteNonTaxable フィールドなし）は非課税通勤手当を
+      // 分離できず課税扱いで過大計上になるため、件数を数えて画面に注記する。
+      if (r.commuteNonTaxable == null) row.legacyMonths += 1;
       // 「給与等の収入金額」= 課税支給額（非課税通勤手当を除く・社保控除前）。
       // r.taxable は社保控除後の金額なのでここでは使わない。
       row.annualGross  += Math.max(0, (Number(r.gross) || 0) - (Number(r.commuteNonTaxable) || 0));
@@ -264,6 +272,11 @@ function Row({ emp, sum }) {
         <div style=${{ fontSize: 10, color: 'var(--text-3)' }}>
           ${type.label} · ${sum.monthsCount}ヶ月分 · 扶養${emp.dependents || 0}人
         </div>
+        ${sum.legacyMonths > 0 && html`
+          <div style=${{ fontSize: 10, color: '#d97706', fontWeight: 600, marginTop: 2 }}>
+            ⚠ ${sum.legacyMonths}ヶ月分は移行データのため通勤手当が課税扱いで集計されています
+          </div>
+        `}
       </td>
       <td class="num" style=${{ ...td, textAlign: 'right' }}>${formatYen(sum.annualGross)}</td>
       <td class="num" style=${{ ...td, textAlign: 'right', color: 'var(--text-2)' }}>${formatYen(sum.annualSocial)}</td>

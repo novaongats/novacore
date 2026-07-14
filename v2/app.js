@@ -8,6 +8,7 @@ import { useState, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { useAuth, signIn, signOut, hasAccess, enableDevBypass, changePassword } from './auth.js';
 import { initDepts } from './depts.js';
+import { confirmNavAway } from './shared.js';
 import { SettingsPage } from './pages/settings.js';
 import { SalesPage } from './pages/sales/index.js';
 import { CashbookPage } from './pages/cashbook/index.js';
@@ -271,6 +272,12 @@ function ChangePasswordScreen({ user }) {
           ${busy ? '変更中...' : '変更してはじめる'}
         </button>
         <div class="login-error">${err}</div>
+        <div style=${{ marginTop: 14, textAlign: 'center' }}>
+          <button type="button" class="btn btn-ghost" disabled=${busy}
+                  onClick=${async () => { try { await signOut(); } catch {} location.reload(); }}>
+            ログアウトして戻る
+          </button>
+        </div>
       </form>
     </div>
   `;
@@ -356,7 +363,11 @@ function AuthenticatedApp({ user }) {
   return html`
     <div class="app-shell">
       <${Sidebar} route=${route} user=${user} open=${menuOpen}
-                  onNavigate=${(id) => { setMenuOpen(false); navigate(id); }} />
+                  onNavigate=${(id) => {
+                    if (id !== route && !confirmNavAway()) return; // 編集中の破棄防止
+                    setMenuOpen(false);
+                    navigate(id);
+                  }} />
       ${menuOpen && html`
         <div class="sidebar-backdrop" onClick=${() => setMenuOpen(false)}></div>
       `}

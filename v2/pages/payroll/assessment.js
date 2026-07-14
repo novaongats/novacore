@@ -9,7 +9,7 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
 import { formatYen, asArray, toCsv, downloadTextFile } from '../../shared.js';
-import { getHealthStandard, findGrade } from './calc.js';
+import { getHealthStandard, findGrade, autoStdBase } from './calc.js';
 import { EMP_TYPE_MAP } from './constants.js';
 
 const html = htm.bind(h);
@@ -46,7 +46,8 @@ export function AssessmentTab() {
       ? Math.round(got.reduce((s, r) => s + (Number(r.gross) || 0), 0) / got.length)
       : null;
     const newStd = avg != null ? getHealthStandard(avg) : null;
-    const curStd = emp.stdRemuneration || (emp.monthlySalary ? getHealthStandard(emp.monthlySalary) : 0);
+    // 現標準報酬の自動判定は autoStdBase（基本給+通勤手当）で3画面統一
+    const curStd = emp.stdRemuneration || (autoStdBase(emp) > 0 ? getHealthStandard(autoStdBase(emp)) : 0);
     const diff = newStd != null ? newStd - curStd : 0;
     const gradeChange = newStd != null ? (findGrade(newStd) || 0) - (findGrade(curStd) || 0) : 0;
     return { m4, m5, m6, avg, newStd, curStd, diff, gradeChange };
@@ -84,7 +85,8 @@ export function AssessmentTab() {
         r.avg || 0,
         r.curStd, findGrade(r.curStd) || '-',
         r.newStd || '-', r.newStd ? (findGrade(r.newStd) || '-') : '-',
-        r.gradeChange > 0 ? '+' + r.gradeChange : String(r.gradeChange),
+        // 数値のまま渡す（'+2' のような文字列は csvCell の数式ガードで «'+2» になるため）
+        r.gradeChange,
       ]);
     }
     downloadTextFile(toCsv(rows), `assessment_${year}.csv`);

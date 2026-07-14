@@ -49,6 +49,24 @@ export function findGrade(std) {
 }
 
 /**
+ * 従業員マスタから標準報酬「自動」判定の基礎となる報酬月額を求める。
+ * calcMonthlyPaycheck の自動判定（basePay + allowance + commuteTotal）と
+ * 同じ考え方で、マスタ値のみから月額を組み立てる唯一の規範ヘルパー:
+ *   月給制: 月給 + 通勤手当（月額）
+ *   時給制: 時給 × 月平均労働時間（未設定は160h） + 通勤手当（月額）
+ * （諸手当は月次入力のためマスタ段階では 0 扱い）
+ * 一覧表示・モーダルの自動プレビュー・算定基礎届の現標準報酬はすべて
+ * getHealthStandard(autoStdBase(emp)) を使うこと。
+ */
+export function autoStdBase(emp) {
+  const typeInfo = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
+  const base = typeInfo.isSalary
+    ? Number(emp.monthlySalary) || 0
+    : Math.floor((Number(emp.hourlyWage) || 0) * (Number(emp.baseHours) || 160));
+  return base + (Number(emp.commuteAllowanceMonthly) || 0);
+}
+
+/**
  * 任意の金額を標準報酬月額の等級にスナップする（データ移行の逆算用）。
  */
 export function snapToStandard(amount) {
@@ -357,12 +375,15 @@ export function calcMonthlyPaycheck(emp, input = {}) {
  * 賞与を計算する一括関数
  *
  * @param emp    payrollEmployees doc
- * @param input  { month, amount, prevMonthAfterSocial, rates }
+ * @param input  { month, amount, prevMonthAfterSocial, hasPrevRecord?, rates }
+ *               hasPrevRecord: false のとき「前月中に給与の支払がない」場合の
+ *               特殊計算（所得税法186条）を適用する。省略時は従来どおり率方式。
  */
 export function calcBonusPaycheck(emp, input = {}) {
   const month = input.month || null;
   const amount = Number(input.amount) || 0;
   const prevMonthAfterSocial = Number(input.prevMonthAfterSocial) || 0;
+  const hasPrevRecord = input.hasPrevRecord !== false;
   const rates = input.rates || {};
 
   const ins = getInsuranceStatus(emp, month);
@@ -392,16 +413,30 @@ export function calcBonusPaycheck(emp, input = {}) {
 
   const social = health + care + pension + childSupport + employment;
 
-  // 賞与所得税 = (賞与 − 社保) × 算出率（1円未満切捨て）
-  const rate = getBonusTaxRateForMonth(prevMonthAfterSocial, emp.dependents || 0, month);
-  const incomeTax = Math.floor(Math.max(0, amount - social) * rate);
+  const taxableBonus = Math.max(0, amount - social);
+  let incomeTax;
+  let rate = null;
+  let specialCalc = false;
+  if (hasPrevRecord) {
+    // 通常: 賞与所得税 = (賞与 − 社保) × 算出率（1円未満切捨て）
+    rate = getBonusTaxRateForMonth(prevMonthAfterSocial, emp.dependents || 0, month);
+    incomeTax = Math.floor(taxableBonus * rate);
+  } else {
+    // 特殊計算（所得税法186条）: 前月中に給与の支払がない場合、
+    // (賞与 − 社保) ÷ 6 を月額表（甲欄）に当てて求めた税額 × 6。
+    // ※賞与の計算期間が6ヶ月超の場合は ÷12 ×12 だが、本システムは
+    //   6ヶ月以下（年2回賞与）を前提とする。
+    specialCalc = true;
+    const monthlyEquiv = Math.floor(taxableBonus / 6);
+    incomeTax = calcIncomeTaxForMonth(monthlyEquiv, emp.dependents || 0, month) * 6;
+  }
 
   const totalDed = social + incomeTax;
   const net = amount - totalDed;
 
   return {
     amount, health, pension, care, childSupport, employment,
-    social, incomeTax, taxRate: rate, totalDed, net,
+    social, incomeTax, taxRate: rate, specialCalc, totalDed, net,
     age: ins.age, insuranceNotes: ins.notes, onLeave,
   };
 }

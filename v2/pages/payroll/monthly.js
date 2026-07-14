@@ -470,6 +470,13 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
         continue;
       }
       const typeInfo = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
+      // 時給制で月平均労働時間が未設定（0h）→ 基本給0で保存してしまうためスキップ
+      // （単発保存側の「労働時間0のまま保存しますか？」確認と整合）
+      if (!typeInfo.isSalary && !(Number(emp.baseHours) > 0)) {
+        lines.push(`⚠ ${emp.name}: 労働時間未設定のためスキップ（従業員マスタで月平均労働時間を登録してください）`);
+        setLog([...lines]);
+        continue;
+      }
       try {
         const calc = calcMonthlyPaycheck(emp, {
           month,
