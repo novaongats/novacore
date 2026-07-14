@@ -38,22 +38,9 @@ const NAV = [
 const DEFAULT_PAGE = 'home';
 const PAGE_IDS = NAV.filter(n => n.id).map(n => n.id);
 
-// ---- Page stubs (will be replaced by real pages as we build them) ----------
+// ---- Pages ------------------------------------------------------------------
 
-function PlaceholderPage({ id, label }) {
-  return html`
-    <div class="placeholder">
-      <div class="icon">🚧</div>
-      <div class="title">${label}</div>
-      <div class="desc">
-        この画面は順次実装中です。<br/>
-        (page id: <code class="mono">${id}</code>)
-      </div>
-    </div>
-  `;
-}
-
-const REAL_PAGES = {
+const PAGES = {
   home:     HomePage,
   settings: SettingsPage,
   sales:    SalesPage,
@@ -63,16 +50,6 @@ const REAL_PAGES = {
   payroll:  PayrollPage,
   tax:      TaxReportPage,
 };
-
-const PAGES = Object.fromEntries(
-  PAGE_IDS.map(id => {
-    if (REAL_PAGES[id]) return [id, REAL_PAGES[id]];
-    const item = NAV.find(n => n.id === id);
-    return [id, (props) =>
-      html`<${PlaceholderPage} id=${id} label=${item.label} ...${props} />`
-    ];
-  })
-);
 
 // ---- Hash router -----------------------------------------------------------
 

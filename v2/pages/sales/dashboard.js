@@ -13,6 +13,7 @@ import {
   sumBy, asArray,
 } from '../../shared.js';
 import { useDepts } from '../../depts.js';
+import { TrendChart } from '../../charts.js';
 
 const html = htm.bind(h);
 
@@ -71,6 +72,16 @@ export function DashboardTab() {
       ${loading ? html`<div style=${{ color: 'var(--text-3)', padding: 20 }}>集計中...</div>` : html`
         <${DeptBars} grid=${grid} month=${month} cats=${asArray(cats.data)} />
         <${CategoryRanking} grid=${grid} month=${month} cats=${asArray(cats.data)} />
+        <div class="card" style=${{ padding: 18, marginBottom: 16 }}>
+          <div style=${{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>売上・コスト推移</div>
+          <${TrendChart}
+            months=${months}
+            series=${[
+              { label: '売上',   color: '#6366f1', values: months.map(m => perMonth[m]?.revenue || 0) },
+              { label: 'コスト', color: '#e11d48', values: months.map(m => perMonth[m]?.cost || 0) },
+            ]}
+          />
+        </div>
         <${TrendTable} perMonth=${perMonth} months=${months} month=${month} />
       `}
     </div>
@@ -372,7 +383,7 @@ function TrendTable({ perMonth, months, month }) {
                   color: m === month ? 'var(--primary)' : 'var(--text-3)',
                   fontWeight: m === month ? 700 : 600,
                 }}>
-                  ${monthLabel(m).replace(/年\d+/, s => s.slice(4))}
+                  ${Number(m.slice(5)) + '月'}
                 </th>
               `)}
             </tr>

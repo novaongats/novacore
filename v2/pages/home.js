@@ -14,6 +14,7 @@ import {
   sumBy, asArray,
 } from '../shared.js';
 import { useDepts } from '../depts.js';
+import { DeptDonut } from '../charts.js';
 
 const html = htm.bind(h);
 
@@ -135,30 +136,12 @@ export function HomePage({ user }) {
           ${stats.totalRevenue === 0 ? html`
             <div style=${{ color: 'var(--text-3)', fontSize: 13 }}>データなし</div>
           ` : html`
-            ${depts.filter(d => stats.byDept[d.key] > 0).map(d => {
-              const val = stats.byDept[d.key];
-              const pct = stats.totalRevenue > 0 ? val / stats.totalRevenue * 100 : 0;
-              return html`
-                <div key=${d.key} style=${{ marginBottom: 10 }}>
-                  <div style=${{ display: 'flex', justifyContent: 'space-between',
-                                 alignItems: 'baseline', marginBottom: 4 }}>
-                    <span style=${{ fontSize: 12, color: d.color, fontWeight: 600 }}>${d.label}</span>
-                    <span class="num" style=${{ fontSize: 13, fontWeight: 700 }}>${formatYen(val)}</span>
-                  </div>
-                  <div style=${{
-                    height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden',
-                  }}>
-                    <div style=${{
-                      width: pct + '%', height: '100%', background: d.color,
-                      transition: 'width .4s',
-                    }}></div>
-                  </div>
-                  <div style=${{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, textAlign: 'right' }}>
-                    ${pct.toFixed(1)}%
-                  </div>
-                </div>
-              `;
-            })}
+            <${DeptDonut}
+              items=${depts
+                .filter(d => stats.byDept[d.key] > 0)
+                .map(d => ({ label: d.label, value: stats.byDept[d.key], color: d.color }))
+                .sort((a, b) => b.value - a.value)}
+            />
           `}
         </div>
 

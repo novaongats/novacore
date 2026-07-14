@@ -38,19 +38,6 @@ export function CashbookPage({ user }) {
         ${tab === 'scan'    && html`<${ScanTab} />`}
       </div>
     </div>
-    <style>
-      .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
-      .tab {
-        padding: 10px 18px; border: none; background: transparent;
-        color: var(--text-3); font-size: 13px; font-weight: 500;
-        cursor: pointer; border-bottom: 2px solid transparent;
-        margin-bottom: -1px; font-family: var(--font-jp); transition: all var(--tx-base);
-      }
-      .tab:hover { color: var(--primary); }
-      .tab.active {
-        color: var(--primary); border-bottom-color: var(--primary); font-weight: 700;
-      }
-    </style>
   `;
 }
 

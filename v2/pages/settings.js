@@ -65,17 +65,6 @@ export function SettingsPage({ user }) {
       </div>
     </div>
     <style>
-      .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
-      .tab {
-        padding: 10px 18px; border: none; background: transparent;
-        color: var(--text-3); font-size: 13px; font-weight: 500;
-        cursor: pointer; border-bottom: 2px solid transparent;
-        margin-bottom: -1px; font-family: var(--font-jp); transition: all var(--tx-base);
-      }
-      .tab:hover { color: var(--primary); }
-      .tab.active {
-        color: var(--primary); border-bottom-color: var(--primary); font-weight: 700;
-      }
       .settings-card { margin-bottom: 16px; }
       .settings-card h3 {
         font-size: 14px; font-weight: 700; margin-bottom: 14px;
@@ -88,14 +77,6 @@ export function SettingsPage({ user }) {
       .kv-row:last-child { border: none; }
       .kv-row .k { color: var(--text-3); }
       .kv-row .v { font-weight: 600; }
-      .note {
-        padding: 10px 14px; border-radius: 10px; font-size: 12px;
-        line-height: 1.7; margin-bottom: 14px;
-      }
-      .note-warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
-      .note-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
-      .note-ok   { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
-      .note-err  { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
       .progress-bar {
         height: 10px; background: var(--border); border-radius: 99px;
         overflow: hidden; margin-top: 8px;

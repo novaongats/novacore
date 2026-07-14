@@ -57,19 +57,5 @@ export function PayrollPage({ user }) {
         ${tab === 'rates'      && html`<${RatesTab} />`}
       </div>
     </div>
-    <style>
-      .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
-      .tab {
-        padding: 10px 16px; border: none; background: transparent;
-        color: var(--text-3); font-size: 12.5px; font-weight: 500;
-        cursor: pointer; border-bottom: 2px solid transparent;
-        margin-bottom: -1px; font-family: var(--font-jp); transition: all var(--tx-base);
-        white-space: nowrap;
-      }
-      .tab:hover { color: var(--primary); }
-      .tab.active {
-        color: var(--primary); border-bottom-color: var(--primary); font-weight: 700;
-      }
-    </style>
   `;
 }

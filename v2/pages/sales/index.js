@@ -41,28 +41,5 @@ export function SalesPage({ user }) {
         ${tab === 'categories' && html`<${CategoriesTab} />`}
       </div>
     </div>
-    <style>
-      .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
-      .tab {
-        padding: 10px 18px; border: none; background: transparent;
-        color: var(--text-3); font-size: 13px; font-weight: 500;
-        cursor: pointer; border-bottom: 2px solid transparent;
-        margin-bottom: -1px; font-family: var(--font-jp); transition: all var(--tx-base);
-      }
-      .tab:hover { color: var(--primary); }
-      .tab.active {
-        color: var(--primary); border-bottom-color: var(--primary); font-weight: 700;
-      }
-    </style>
-  `;
-}
-
-function WipTab({ label }) {
-  return html`
-    <div class="placeholder" style=${{ minHeight: '30vh' }}>
-      <div class="icon">🚧</div>
-      <div class="title">${label}</div>
-      <div class="desc">このタブは順次実装中です</div>
-    </div>
   `;
 }
