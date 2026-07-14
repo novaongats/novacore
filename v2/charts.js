@@ -9,7 +9,7 @@
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
-import { useState } from 'https://esm.sh/preact@10.22.0/hooks';
+import { useState, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { formatYen } from './shared.js';
 
@@ -44,11 +44,16 @@ function niceMax(v) {
 export function TrendChart({ months, series, height = 200 }) {
   const [hover, setHover] = useState(null); // hovered month index
 
+  // データが変わったらホバー位置をリセット（古いインデックスの残留参照を防ぐ）
+  useEffect(() => { setHover(null); }, [months, series]);
+
   const W = 720, H = height;
   const PAD = { top: 14, right: 84, bottom: 26, left: 52 };
   const iw = W - PAD.left - PAD.right;
   const ih = H - PAD.top - PAD.bottom;
   const n = months.length;
+  // 範囲外インデックスをガード（months 縮小直後のクラッシュ防止）
+  const hi = (hover != null && hover >= 0 && hover < n) ? hover : null;
   if (n === 0 || series.every(s => s.values.every(v => !v))) {
     return html`<div style=${{ color: 'var(--text-3)', fontSize: 13, padding: '20px 0' }}>データなし</div>`;
   }
@@ -102,15 +107,15 @@ export function TrendChart({ months, series, height = 200 }) {
         <!-- x軸月ラベル -->
         ${months.map((m, i) => html`
           <text key=${m} x=${x(i)} y=${H - 8} text-anchor="middle"
-                font-size="10.5" font-weight=${hover === i ? 700 : 500}
-                fill=${hover === i ? 'var(--text)' : 'var(--text-3)'}>
+                font-size="10.5" font-weight=${hi === i ? 700 : 500}
+                fill=${hi === i ? 'var(--text)' : 'var(--text-3)'}>
             ${Number(m.slice(5))}月
           </text>
         `)}
 
         <!-- クロスヘア -->
-        ${hover != null && html`
-          <line x1=${x(hover)} x2=${x(hover)} y1=${PAD.top} y2=${PAD.top + ih}
+        ${hi != null && html`
+          <line x1=${x(hi)} x2=${x(hi)} y1=${PAD.top} y2=${PAD.top + ih}
                 stroke="var(--text-4)" stroke-width="1" stroke-dasharray="3,3" />
         `}
 
@@ -124,7 +129,7 @@ export function TrendChart({ months, series, height = 200 }) {
                         stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
               ${s.values.map((v, i) => html`
                 <circle key=${i} cx=${x(i)} cy=${y(v)}
-                        r=${hover === i ? 4.5 : 3}
+                        r=${hi === i ? 4.5 : 3}
                         fill=${s.color} stroke="var(--surface)" stroke-width="2" />
               `)}
               <!-- 直接ラベル（終端） -->
@@ -139,23 +144,23 @@ export function TrendChart({ months, series, height = 200 }) {
       </svg>
 
       <!-- ツールチップ -->
-      ${hover != null && html`
+      ${hi != null && months[hi] != null && html`
         <div style=${{
           position: 'absolute',
-          left: `${(x(hover) / W) * 100}%`, top: 24,
-          transform: x(hover) > W * 0.6 ? 'translateX(-105%)' : 'translateX(8px)',
+          left: `${(x(hi) / W) * 100}%`, top: 24,
+          transform: x(hi) > W * 0.6 ? 'translateX(-105%)' : 'translateX(8px)',
           background: 'var(--text)', color: 'var(--surface)',
           borderRadius: 8, padding: '8px 12px', fontSize: 11.5,
           pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 5,
           boxShadow: 'var(--shadow-lg)',
         }}>
           <div style=${{ fontWeight: 700, marginBottom: 4 }}>
-            ${months[hover].replace('-', '年').replace(/年0?/, '年') + '月'}
+            ${months[hi].replace('-', '年').replace(/年0?/, '年') + '月'}
           </div>
           ${series.map(s => html`
             <div key=${s.label} style=${{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style=${{ width: 8, height: 8, borderRadius: 2, background: s.color }}></span>
-              ${s.label}: <strong>${formatYen(s.values[hover])}</strong>
+              ${s.label}: <strong>${formatYen(s.values[hi] || 0)}</strong>
             </div>
           `)}
         </div>
@@ -172,6 +177,14 @@ export function TrendChart({ months, series, height = 200 }) {
  */
 export function DeptDonut({ items, size = 168 }) {
   const [hover, setHover] = useState(null);
+
+  // items が変わったらホバーをリセット（縮んだ配列への stale index 参照を防ぐ）
+  useEffect(() => { setHover(null); }, [items]);
+
+  // ガード: hover が範囲外なら「合計」表示にフォールバック
+  const hoverItem = (hover != null && items[hover]) ? items[hover] : null;
+  const hv = hoverItem ? hover : null; // 有効なホバーインデックスのみ
+
   const total = items.reduce((s, x) => s + (Number(x.value) || 0), 0);
   if (total <= 0) {
     return html`<div style=${{ color: 'var(--text-3)', fontSize: 13 }}>データなし</div>`;
@@ -201,7 +214,7 @@ export function DeptDonut({ items, size = 168 }) {
           if (end - start < 0.001) return null;
           return html`
             <path key=${it.label} d=${arcPath(start, end)} fill=${it.color}
-                  opacity=${hover == null || hover === idx ? 1 : 0.35}
+                  opacity=${hv == null || hv === idx ? 1 : 0.35}
                   style=${{ transition: 'opacity .15s', cursor: 'default' }}
                   onMouseEnter=${() => setHover(idx)} onMouseLeave=${() => setHover(null)}>
               <title>${it.label}: ${formatYen(it.value)} (${Math.round(it.value / total * 100)}%)</title>
@@ -209,11 +222,11 @@ export function DeptDonut({ items, size = 168 }) {
           `;
         })}
         <text x="60" y="56" text-anchor="middle" font-size="9" fill="var(--text-3)">
-          ${hover != null ? items[hover].label : '合計'}
+          ${hoverItem ? hoverItem.label : '合計'}
         </text>
         <text x="60" y="70" text-anchor="middle" font-size="11" font-weight="800"
               fill="var(--text)" font-family="var(--font-num)">
-          ${yenShort(hover != null ? items[hover].value : total)}
+          ${yenShort(hoverItem ? hoverItem.value : total)}
         </text>
       </svg>
 
@@ -223,7 +236,7 @@ export function DeptDonut({ items, size = 168 }) {
           <div key=${it.label}
                onMouseEnter=${() => setHover(idx)} onMouseLeave=${() => setHover(null)}
                style=${{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5,
-                         opacity: hover == null || hover === idx ? 1 : 0.5 }}>
+                         opacity: hv == null || hv === idx ? 1 : 0.5 }}>
             <span style=${{ width: 10, height: 10, borderRadius: 3, background: it.color, flexShrink: 0 }}></span>
             <span style=${{ color: 'var(--text-2)', flex: 1 }}>${it.label}</span>
             <span class="num" style=${{ fontWeight: 700 }}>${formatYen(it.value)}</span>

@@ -7,7 +7,12 @@
 import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
+import {
+  writeBatch, doc, serverTimestamp,
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { db } from '../firebase.js';
 import { repos } from '../store.js';
+import { isDevBypass } from '../auth.js';
 import { useDepts } from '../depts.js';
 
 const html = htm.bind(h);
@@ -35,14 +40,28 @@ export function DeptsAdminSection() {
   }
 
   async function move(d, dir) {
-    // order を隣と入れ替え
+    // order を隣と入れ替え（writeBatch で1コミット — 途中失敗による不整合を防ぐ）
     const sorted = [...depts].sort((a, b) => a.order - b.order);
     const i = sorted.findIndex(x => x.key === d.key);
     const j = i + dir;
     if (j < 0 || j >= sorted.length) return;
     try {
-      await repos.salesDepts.setId(sorted[i].key, { order: sorted[j].order });
-      await repos.salesDepts.setId(sorted[j].key, { order: sorted[i].order });
+      if (isDevBypass()) {
+        throw new Error('デモモード中はデータを保存できません（UI確認のみ）');
+      }
+      // order が同値衝突している場合は全部門を 0..n-1 に正規化してからスワップ
+      const hasCollision = new Set(sorted.map(x => x.order)).size !== sorted.length;
+      const orders = sorted.map((x, idx) => hasCollision ? idx : x.order);
+      [orders[i], orders[j]] = [orders[j], orders[i]];
+
+      const batch = writeBatch(db);
+      sorted.forEach((x, idx) => {
+        // 正規化不要時はスワップ対象の2件のみ書く
+        if (!hasCollision && idx !== i && idx !== j) return;
+        batch.set(doc(db, 'salesDepts', x.key),
+          { order: orders[idx], updatedAt: serverTimestamp() }, { merge: true });
+      });
+      await batch.commit();
     } catch (e) {
       setErr('並べ替えに失敗: ' + (e.message || e));
     }
@@ -132,6 +151,7 @@ function DeptModal({ initial, existing, onClose }) {
     }
     setBusy(true);
     try {
+      // 注: 同時追加で order が衝突する可能性はあるが許容（move() 側で正規化される）
       const maxOrder = Math.max(0, ...existing.map(d => d.order || 0));
       await repos.salesDepts.setId(isNew ? key : initial.key, {
         label,

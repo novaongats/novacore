@@ -7,7 +7,7 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, orderBy } from '../../store.js';
-import { formatYen, monthLabel, asArray, sumBy } from '../../shared.js';
+import { formatYen, monthLabel, asArray, sumBy, toCsv, downloadTextFile } from '../../shared.js';
 import { EMP_TYPE_MAP } from './constants.js';
 import { PayslipOverlay } from './payslip.js';
 
@@ -45,24 +45,17 @@ export function ListTab() {
   }), [filtered]);
 
   function exportCsv() {
-    const header = ['月', '従業員ID', '氏名', '雇用形態', '総支給', '通勤手当', '健保', '年金', '介護', '子育て支援金', '雇保', '所得税', '住民税', '控除計', '差引支給'];
-    const lines = [header.join(',')];
+    const rows = [['月', '従業員ID', '氏名', '雇用形態', '総支給', '通勤手当', '健保', '年金', '介護', '子育て支援金', '雇保', '所得税', '住民税', '控除計', '差引支給']];
     for (const r of filtered) {
-      lines.push([
+      rows.push([
         r.month, r.empId, r.empName, EMP_TYPE_MAP[r.empType]?.label || r.empType,
         r.gross || 0, r.commuteTotal || 0, r.health || 0, r.pension || 0, r.care || 0,
         r.childSupport || 0,
         r.employment || 0, r.incomeTax || 0, r.residentTax || 0,
         r.totalDed || 0, r.net || 0,
-      ].join(','));
+      ]);
     }
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `payroll_records_${filterMonth === 'all' ? 'all' : filterMonth}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    downloadTextFile(toCsv(rows), `payroll_records_${filterMonth === 'all' ? 'all' : filterMonth}.csv`);
   }
 
   return html`

@@ -66,7 +66,8 @@ export function MonthlyTab() {
         </span>
 
         <div style=${{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button class="btn" onClick=${() => setShowBatchModal(true)} disabled=${empList.length === 0}>
+          <button class="btn" onClick=${() => setShowBatchModal(true)}
+                  disabled=${empList.length === 0 || records.loading}>
             📊 一括計算
           </button>
           <button class="btn btn-ghost"
@@ -94,7 +95,14 @@ export function MonthlyTab() {
             onSelect=${setSelectedEmpId}
           />
           <div>
-            ${selectedEmp ? html`
+            ${records.loading ? html`
+              <!-- 既存レコード読込前に CalcPanel をマウントすると、
+                   入力欄が既定値のまま「✓計算済」になり保存で月次調整を
+                   上書きしてしまうため、読込完了までスケルトンを表示する -->
+              <div class="card" style=${{ padding: '40px', textAlign: 'center', color: 'var(--text-3)' }}>
+                ${monthLabel(month)} の計算結果を読込中...
+              </div>
+            ` : selectedEmp ? html`
               <${CalcPanel}
                 key=${selectedEmp.id + '|' + month}
                 emp=${selectedEmp}
@@ -212,6 +220,13 @@ function CalcPanel({ emp, month, rates, existing, onPreview }) {
 
   async function save() {
     setErr(null);
+    // 保存前バリデーション
+    if (!typeInfo.isSalary && !(Number(input.hours) > 0)) {
+      if (!confirm(`${emp.name} は時給制ですが労働時間が0のままです。\n労働時間が0のまま保存しますか？`)) return;
+    }
+    if (calc.net < 0) {
+      if (!confirm(`差引支給額がマイナス（${formatYen(calc.net)}）です。\nこのまま保存しますか？`)) return;
+    }
     setBusy(true);
     try {
       const id = `${month}_${emp.id}`;
@@ -478,8 +493,9 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
           incomeTax: calc.incomeTax, residentTax: calc.residentTax,
           totalDed: calc.totalDed, net: calc.net,
         });
-        const warn = (!calc.residentTax && emp.type === 'executive') ? ' ⚠住民税¥0' : '';
-        lines.push(`✓ ${emp.name}: 差引 ${formatYen(calc.net)}${warn}`);
+        let warn = (!calc.residentTax && emp.type === 'executive') ? ' ⚠住民税¥0' : '';
+        if (calc.net < 0) warn += ' ⚠差引支給額がマイナスです（要確認）';
+        lines.push(`${calc.net < 0 ? '⚠' : '✓'} ${emp.name}: 差引 ${formatYen(calc.net)}${warn}`);
       } catch (e) {
         lines.push(`✗ ${emp.name}: ${e.message}`);
       }

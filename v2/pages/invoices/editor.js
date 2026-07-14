@@ -1,7 +1,13 @@
 /* ============================================================
    NOVA Core v2 — Invoices / Editor tab
    Create/edit invoice/receipt/quote/delivery documents.
-   Preview + print layout will come in Phase 6b-2.
+
+   採番: 新規作成中は未採番（「（保存時に採番）」表示）。初回保存時に
+   counters コレクションの Firestore トランザクションで採番する
+   （calc.js allocateDocNumber）。手入力で番号を指定した場合はそれを優先。
+
+   発行済みガード: status が issued/paid の書類は物理削除不可 —
+   「取消」ボタンで status:'void' に遷移させる。draft のみ物理削除可。
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -11,20 +17,42 @@ import { repos, useCollection, useDoc } from '../../store.js';
 import { today, formatYen, uid, asArray } from '../../shared.js';
 import {
   DOC_TYPES, DOC_TYPE_MAP, TAX_TYPES, STATUSES,
-  calcTotals, nextDocNumber,
+  calcTotals, allocateDocNumber,
 } from './calc.js';
 import { PreviewOverlay } from './preview.js';
 
 const html = htm.bind(h);
 
+// ---- Form normalization helpers (dirty detection / save payload) ----------
+
+/** Strip internal _key from items (comparison / persistence). */
+function stripForm(f) {
+  if (!f) return f;
+  return { ...f, items: (f.items || []).map(({ _key, ...rest }) => rest) };
+}
+
+/** Items normalized to fixed key order + numeric qty/price (for comparison). */
+function normItems(items) {
+  return (items || []).map(it => ({
+    name: it.name || '',
+    quantity: Number(it.quantity) || 0,
+    unit: it.unit || '',
+    unitPrice: Number(it.unitPrice) || 0,
+    taxType: it.taxType || '10',
+    taxIncluded: !!it.taxIncluded,
+    memo: it.memo || '',
+  }));
+}
+
 // ---- Main component -------------------------------------------------------
 
-export function EditorTab({ docId, onDone }) {
+export function EditorTab({ docId, onDone, dirtyRef }) {
   const issuerQ  = useDoc(repos.settings, 'invoiceIssuer');
   const clientsQ = useCollection(repos.invoiceClients);
   const banksQ   = useCollection(repos.invoiceBanks);
 
   const [form, setForm]           = useState(null);
+  const [initial, setInitial]     = useState(null);  // 初期スナップショット（_key除去済）
   const [initError, setInitError] = useState(null);
   const [busy, setBusy]           = useState(false);
   const [saveErr, setSaveErr]     = useState(null);
@@ -38,6 +66,7 @@ export function EditorTab({ docId, onDone }) {
     let cancelled = false;
     (async () => {
       setForm(null);
+      setInitial(null);
       setInitError(null);
       try {
         if (docId) {
@@ -47,10 +76,12 @@ export function EditorTab({ docId, onDone }) {
           // Ensure items have keys for React rendering
           d.items = (d.items || []).map(it => ({ ...it, _key: it._key || Math.random().toString(36).slice(2) }));
           setForm(d);
+          setInitial(stripForm(d));
         } else {
-          const number = await nextDocNumber(repos.invoices, 'invoice');
-          if (cancelled) return;
-          setForm(makeNewForm('invoice', number, issuerQ.data, banksQ.data));
+          // 採番は初回保存時（allocateDocNumber）。ここでは番号なしで開始。
+          const f = makeNewForm('invoice', issuerQ.data, banksQ.data);
+          setForm(f);
+          setInitial(stripForm(f));
         }
       } catch (e) {
         if (!cancelled) setInitError(e.message || String(e));
@@ -58,6 +89,30 @@ export function EditorTab({ docId, onDone }) {
     })();
     return () => { cancelled = true; };
   }, [docId, mastersReady]);
+
+  // --- Dirty tracking (G) ---------------------------------------------------
+  // 初期フォームとの差分でダーティ判定。親（index.js）のタブ切替ガードは
+  // dirtyRef 経由で参照する。beforeunload はダーティ時のみ有効化。
+
+  const dirty = !!(form && initial &&
+    JSON.stringify(stripForm(form)) !== JSON.stringify(initial));
+
+  useEffect(() => {
+    if (dirtyRef) dirtyRef.current = dirty;
+  }, [dirty, dirtyRef]);
+
+  // Reset the flag when the editor unmounts (e.g. after save/cancel).
+  useEffect(() => {
+    return () => { if (dirtyRef) dirtyRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty]);
 
   if (!mastersReady) return html`<div style=${{ color: 'var(--text-3)' }}>マスタ読込中...</div>`;
   if (initError) return html`<div class="note note-err">${initError}</div>`;
@@ -67,13 +122,10 @@ export function EditorTab({ docId, onDone }) {
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
-  async function changeType(newType) {
+  function changeType(newType) {
+    // 採番は保存時に行うため、型変更で番号を再生成する必要はない
+    // （手入力済みの番号はそのまま維持される）。
     set('type', newType);
-    // Regenerate docNumber only for new documents
-    if (!docId) {
-      const n = await nextDocNumber(repos.invoices, newType);
-      setForm(f => ({ ...f, docNumber: n }));
-    }
   }
 
   function pickClient(id) {
@@ -96,7 +148,17 @@ export function EditorTab({ docId, onDone }) {
 
   function pickBank(id) {
     if (!id) {
-      setForm(f => ({ ...f, bankId: '' }));
+      // 「振込先なし」選択時はスナップショットの残留を防ぐため全フィールドをクリア
+      setForm(f => ({
+        ...f,
+        bankId: '',
+        bankName: '',
+        bankBranch: '',
+        bankAccountType: '',
+        bankAccountNumber: '',
+        bankAccountHolder: '',
+        bankAccountHolderKana: '',
+      }));
       return;
     }
     const b = (banksQ.data || []).find(x => x.id === id);
@@ -135,26 +197,67 @@ export function EditorTab({ docId, onDone }) {
     setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
   }
 
+  // --- Computed ------------------------------------------------------------
+
+  const totals = calcTotals(form.items || []);
+  const typeInfo = DOC_TYPE_MAP[form.type] || DOC_TYPES[0];
+  const isInvoice = form.type === 'invoice';
+  const isQuote   = form.type === 'quote';
+  const isReceipt = form.type === 'receipt';
+
+  // 発行済みガード判定は「保存済みの」ステータス（initial）で行う。
+  const origStatus = (docId && initial?.status) || 'draft';
+  const locked   = !!docId && (origStatus === 'issued' || origStatus === 'paid');
+  const isVoided = origStatus === 'void' || origStatus === 'cancelled';
+
   // --- Save / delete -------------------------------------------------------
 
   async function save() {
     setSaveErr(null);
     if (!form.clientCompany?.trim()) { setSaveErr('宛先の会社名は必須です'); return; }
+    if (!form.issueDate) { setSaveErr('発行日を入力してください'); return; }
     if (!form.items?.length) { setSaveErr('品目を少なくとも1件追加してください'); return; }
-    if (!form.items.some(i => Number(i.unitPrice) > 0 && Number(i.quantity) > 0)) {
+
+    // quantity / unitPrice は Number に正規化して保存（文字列のまま入れない）
+    const items = form.items.map(({ _key, ...rest }) => ({
+      ...rest,
+      quantity: Number(rest.quantity) || 0,
+      unitPrice: Number(rest.unitPrice) || 0,
+    }));
+    if (!items.some(i => i.unitPrice > 0 && i.quantity > 0)) {
       setSaveErr('少なくとも1つの品目で金額を入力してください'); return;
     }
+    const totals = calcTotals(items);
+    if (totals.total < 0) { setSaveErr('合計金額が負の値です。品目を確認してください'); return; }
+
+    // 適格請求書の発行者名（B）: 未設定のまま発行しようとしたら警告
+    if (!form.issuerCompany?.trim()) {
+      if (!confirm('発行元（自社情報）が未設定です。適格請求書には発行者名が必要です。\nこのまま保存しますか？（「自社情報」タブで設定できます）')) return;
+    }
+
+    // 発行済み書類の金額・品目変更ガード（D）
+    if (locked) {
+      const changed = JSON.stringify(normItems(initial?.items)) !== JSON.stringify(normItems(items));
+      if (changed) {
+        if (!confirm('発行済みの書類を変更します。取引先に再送が必要になる可能性があります。よろしいですか？')) return;
+      }
+    }
+
     setBusy(true);
     try {
-      const totals = calcTotals(form.items);
-      const id = form.id || uid('inv_');
+      // 採番（C）: 番号が空なら初回保存時にトランザクションで採番。
+      // 失敗時はフォールバックせずエラー表示して保存を中断する。
+      let docNumber = (form.docNumber || '').trim();
+      if (!docNumber) {
+        docNumber = await allocateDocNumber(form.type, form.issueDate);
+      }
 
-      // Strip out item _key (internal only)
-      const items = form.items.map(({ _key, ...rest }) => rest);
+      const id = form.id || uid('inv_');
 
       await repos.invoices.upsert({
         ...form,
         id,
+        docNumber,
         items,
         subtotal: totals.subtotal,
         taxAmount: totals.taxAmount,
@@ -162,6 +265,7 @@ export function EditorTab({ docId, onDone }) {
         tax8: totals.tax8,
         totalAmount: totals.total,
       });
+      if (dirtyRef) dirtyRef.current = false;
       onDone?.();
     } catch (e) {
       console.error('[invoices] save failed', e);
@@ -173,10 +277,31 @@ export function EditorTab({ docId, onDone }) {
 
   async function remove() {
     if (!form.id) return;
-    if (!confirm(`「${form.docNumber}」を削除しますか？`)) return;
+    setSaveErr(null);
+
+    if (locked) {
+      // 発行済み/入金済は物理削除せず「取消」(void) に遷移（D）。
+      // 採番はカウンター方式のため、取消済み番号が再利用されることはない。
+      if (!confirm(`「${form.docNumber}」を取消にしますか？\n（物理削除はされず、ステータスが「取消」になります）`)) return;
+      setBusy(true);
+      try {
+        await repos.invoices.upsert({ id: form.id, status: 'void' });
+        if (dirtyRef) dirtyRef.current = false;
+        onDone?.();
+      } catch (e) {
+        console.error('[invoices] void failed', e);
+        setSaveErr('取消に失敗: ' + (e.message || e));
+        setBusy(false);
+      }
+      return;
+    }
+
+    // draft のみ物理削除可
+    if (!confirm(`「${form.docNumber || '（未採番）'}」を削除しますか？`)) return;
     setBusy(true);
     try {
       await repos.invoices.remove(form.id);
+      if (dirtyRef) dirtyRef.current = false;
       onDone?.();
     } catch (e) {
       console.error('[invoices] delete failed', e);
@@ -185,17 +310,23 @@ export function EditorTab({ docId, onDone }) {
     }
   }
 
-  // --- Computed ------------------------------------------------------------
-
-  const totals = calcTotals(form.items || []);
-  const typeInfo = DOC_TYPE_MAP[form.type] || DOC_TYPES[0];
-  const isInvoice = form.type === 'invoice';
+  function cancel() {
+    if (dirty && !confirm('編集中の内容が保存されていません。破棄しますか？')) return;
+    if (dirtyRef) dirtyRef.current = false;
+    onDone?.();
+  }
 
   // --- Render --------------------------------------------------------------
 
   return html`
     <div style=${{ maxWidth: 900 }}>
       ${saveErr && html`<div class="note note-err">${saveErr}</div>`}
+
+      ${isVoided && html`
+        <div class="note note-err" style=${{ marginBottom: 12 }}>
+          この書類は取消済みです
+        </div>
+      `}
 
       <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
         <div style=${{ fontSize: 13, color: 'var(--text-3)' }}>
@@ -211,7 +342,8 @@ export function EditorTab({ docId, onDone }) {
       <${Section} title="基本情報">
         <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           <${Field} label="書類番号">
-            <input type="text" value=${form.docNumber}
+            <input type="text" value=${form.docNumber || ''}
+                   placeholder=${docId ? '' : '（保存時に採番）'}
                    onInput=${e => set('docNumber', e.target.value)} disabled=${busy}
                    style=${{ ...inputStyle, fontFamily: 'var(--font-mono)' }} />
           </Field>
@@ -220,10 +352,17 @@ export function EditorTab({ docId, onDone }) {
                    onInput=${e => set('issueDate', e.target.value)} disabled=${busy}
                    style=${inputStyle} />
           </Field>
-          ${isInvoice && html`
-            <${Field} label="支払期日">
+          ${(isInvoice || isQuote) && html`
+            <${Field} label=${isInvoice ? '支払期日' : '有効期限'}>
               <input type="date" value=${form.dueDate || ''}
                      onInput=${e => set('dueDate', e.target.value)} disabled=${busy}
+                     style=${inputStyle} />
+            </Field>
+          `}
+          ${isReceipt && html`
+            <${Field} label="但し書き">
+              <input type="text" value=${form.proviso ?? 'お品代として'}
+                     onInput=${e => set('proviso', e.target.value)} disabled=${busy}
                      style=${inputStyle} />
             </Field>
           `}
@@ -360,11 +499,18 @@ export function EditorTab({ docId, onDone }) {
                    onChange=${e => set('showTaxIncluded', e.target.checked)} disabled=${busy} />
             税込表示（合計欄に「税込」を明記）
           </label>
-          <label style=${checkLabel}>
-            <input type="checkbox" checked=${!!form.hideTaxBreakdown}
-                   onChange=${e => set('hideTaxBreakdown', e.target.checked)} disabled=${busy} />
+          <label style=${{ ...checkLabel, opacity: isInvoice ? 0.5 : 1, cursor: isInvoice ? 'not-allowed' : 'pointer' }}
+                 title=${isInvoice ? '適格請求書では税率別内訳の記載が必須です' : ''}>
+            <input type="checkbox" checked=${isInvoice ? false : !!form.hideTaxBreakdown}
+                   onChange=${e => set('hideTaxBreakdown', e.target.checked)}
+                   disabled=${busy || isInvoice} />
             税内訳を非表示
           </label>
+          ${isInvoice && html`
+            <span style=${{ fontSize: 11, color: 'var(--text-4)' }}>
+              ※ 適格請求書では税率別内訳の記載が必須です
+            </span>
+          `}
           <div style=${{ marginLeft: 'auto' }}>
             <label style=${{ fontSize: 12, color: 'var(--text-3)', marginRight: 6 }}>ステータス</label>
             <select value=${form.status || 'draft'} onChange=${e => set('status', e.target.value)}
@@ -384,12 +530,15 @@ export function EditorTab({ docId, onDone }) {
         marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)',
       }}>
         <div>
-          ${form.id && html`
-            <button class="btn btn-danger" onClick=${remove} disabled=${busy}>削除</button>
+          ${form.id && !isVoided && html`
+            <button class="btn btn-danger" onClick=${remove} disabled=${busy}
+                    title=${locked ? '発行済みのため物理削除できません。取消（void）に遷移します' : ''}>
+              ${locked ? '取消' : '削除'}
+            </button>
           `}
         </div>
         <div style=${{ display: 'flex', gap: 8 }}>
-          <button class="btn btn-ghost" onClick=${onDone} disabled=${busy}>キャンセル</button>
+          <button class="btn btn-ghost" onClick=${cancel} disabled=${busy}>キャンセル</button>
           <button class="btn" onClick=${save} disabled=${busy}>
             ${busy ? '保存中...' : (form.id ? '更新' : '保存')}
           </button>
@@ -477,8 +626,9 @@ function ItemsTable({ items, onUpdate, onRemove, onAdd, busy }) {
         const qty = Number(it.quantity) || 0;
         const price = Number(it.unitPrice) || 0;
         const lineAmount = qty * price;
+        const rowKey = it._key || idx;
         return html`
-          <div key=${it._key || idx} style=${{
+          <div key=${rowKey} style=${{
             display: 'grid',
             gridTemplateColumns: '1fr 80px 80px 110px 100px 80px 40px',
             gap: 6, alignItems: 'center', marginBottom: 4,
@@ -508,7 +658,7 @@ function ItemsTable({ items, onUpdate, onRemove, onAdd, busy }) {
             <button class="btn btn-ghost" onClick=${() => onRemove(idx)} disabled=${busy}
                     style=${{ padding: '6px 8px' }} title="行を削除">×</button>
           </div>
-          <div style=${{
+          <div key=${rowKey + '-amount'} style=${{
             marginLeft: 6, fontSize: 11, color: 'var(--text-3)', marginBottom: 8,
             textAlign: 'right',
           }}>
@@ -557,13 +707,13 @@ function TotalsBar({ totals }) {
 
 // ---- Helpers --------------------------------------------------------------
 
-function makeNewForm(type, docNumber, issuer, banks) {
+function makeNewForm(type, issuer, banks) {
   const defaultBank = (banks || []).find(b => b.isDefault) || (banks || [])[0] || null;
   const i = issuer || {};
   return {
     id: null,
     type,
-    docNumber,
+    docNumber: '',  // 初回保存時にトランザクションで採番
     issueDate: today(),
     dueDate: '',
     status: 'draft',
@@ -600,6 +750,9 @@ function makeNewForm(type, docNumber, issuer, banks) {
       name: '', quantity: 1, unit: '', unitPrice: 0,
       taxType: '10', taxIncluded: false, memo: '',
     }],
+
+    // Receipt only: 但し書き
+    proviso: 'お品代として',
 
     // Display options
     showTaxIncluded: false,

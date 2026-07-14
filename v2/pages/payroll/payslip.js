@@ -8,47 +8,54 @@ import htm from 'https://esm.sh/htm@3.1.1';
 import { useDoc } from '../../store.js';
 import { repos } from '../../store.js';
 import { formatYen, monthLabel } from '../../shared.js';
+import { PrintPortal } from '../../print.js';
 
 const html = htm.bind(h);
 
 // ---- Overlay wrapper (print dialog + toolbar) -----------------------------
 
 export function PayslipOverlay({ records = [], onClose, kind = 'monthly' }) {
-  if (!records || records.length === 0) return null;
+  // フックは早期 return より前に呼ぶ（Rules of Hooks）
   const issuerQ = useDoc(repos.settings, 'invoiceIssuer');
+  if (!records || records.length === 0) return null;
   const issuer = issuerQ.data || {};
 
   function handlePrint() {
     window.print();
   }
 
+  // PrintPortal: body 直下に描画し、印刷時は #app を display:none にする
+  // （styles.css の has-print-overlay ルール）。これで page-break が
+  // 通常フローで機能し、複数人分が全ページ印刷される。
   return html`
-    <div class="payslip-overlay">
-      <div class="payslip-toolbar no-print">
-        <div style=${{ color: '#fff', fontWeight: 600 }}>
-          ${kind === 'bonus' ? '賞与明細' : '給与明細'} プレビュー
-          <span style=${{ marginLeft: 10, fontSize: 12, opacity: 0.7 }}>
-            ${records.length} 名分
-          </span>
+    <${PrintPortal}>
+      <div class="payslip-overlay">
+        <div class="payslip-toolbar no-print">
+          <div style=${{ color: '#fff', fontWeight: 600 }}>
+            ${kind === 'bonus' ? '賞与明細' : '給与明細'} プレビュー
+            <span style=${{ marginLeft: 10, fontSize: 12, opacity: 0.7 }}>
+              ${records.length} 名分
+            </span>
+          </div>
+          <div style=${{ display: 'flex', gap: 8 }}>
+            <button class="btn" onClick=${handlePrint}
+                    style=${{ background: '#10b981' }}>🖨 印刷 / PDF保存</button>
+            <button class="btn btn-ghost" onClick=${onClose}
+                    style=${{ background: 'rgba(255,255,255,0.12)', color: '#fff', borderColor: 'transparent' }}>
+              ✕ 閉じる
+            </button>
+          </div>
         </div>
-        <div style=${{ display: 'flex', gap: 8 }}>
-          <button class="btn" onClick=${handlePrint}
-                  style=${{ background: '#10b981' }}>🖨 印刷 / PDF保存</button>
-          <button class="btn btn-ghost" onClick=${onClose}
-                  style=${{ background: 'rgba(255,255,255,0.12)', color: '#fff', borderColor: 'transparent' }}>
-            ✕ 閉じる
-          </button>
+
+        <div class="payslip-stage">
+          ${records.map((rec, i) => html`
+            <${Slip} key=${i} rec=${rec} issuer=${issuer} kind=${kind} />
+          `)}
         </div>
-      </div>
 
-      <div class="payslip-stage">
-        ${records.map((rec, i) => html`
-          <${Slip} key=${i} rec=${rec} issuer=${issuer} kind=${kind} />
-        `)}
+        ${printStyle}
       </div>
-
-      ${printStyle}
-    </div>
+    </${PrintPortal}>
   `;
 }
 
@@ -65,7 +72,15 @@ function Slip({ rec, issuer, kind }) {
         <div class="payslip-title">${title}</div>
         <div class="payslip-meta">
           <div>${monthStr}${isBonus ? '' : '分'}</div>
-          <div class="payslip-company">${issuer.companyName || ''}</div>
+          ${issuer.companyName ? html`
+            <div class="payslip-company">${issuer.companyName}</div>
+          ` : html`
+            <!-- 未設定の案内は画面プレビューのみ表示（印刷時は空欄） -->
+            <div class="payslip-company no-print"
+                 style=${{ color: '#999', fontWeight: 400, fontSize: '9pt' }}>
+              （会社名未設定 — 設定→会社・事業で登録）
+            </div>
+          `}
         </div>
       </div>
 
@@ -233,16 +248,27 @@ const printStyle = html`
 
   @media print {
     @page { size: A4; margin: 0; }
-    body { background: #fff !important; }
-    body * { visibility: hidden; }
-    .payslip-paper, .payslip-paper * { visibility: visible; }
-    .payslip-overlay, .payslip-stage { background: #fff !important; padding: 0 !important; }
-    .payslip-stage { gap: 0 !important; }
+    /* PrintPortal が body 直下に描画し #app は styles.css 側で非表示になる。
+       visibility ハックは不要。overlay を通常フローに戻して
+       .payslip-paper の page-break-after を機能させる。 */
+    .no-print { display: none !important; }
+    .payslip-overlay {
+      position: static !important;
+      inset: auto !important;
+      display: block !important;
+      background: #fff !important;
+    }
+    .payslip-stage {
+      display: block !important;
+      overflow: visible !important;
+      padding: 0 !important;
+      background: #fff !important;
+    }
     .payslip-paper {
       box-shadow: none;
       width: 210mm; min-height: 140mm;
+      margin: 0;
     }
-    .no-print { display: none !important; }
   }
 </style>
 `;

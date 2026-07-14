@@ -7,13 +7,16 @@
 import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useEffect, useMemo, useRef } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
-import { repos, useCollection, uploadFile } from '../../store.js';
+import { repos, useCollection, uploadFile, deleteFile } from '../../store.js';
 import { getClaudeApiKey } from '../settings.js';
 import {
   formatYen, today, uid, asArray,
 } from '../../shared.js';
 
 const html = htm.bind(h);
+
+// インボイス登録番号の形式（T + 13桁）。警告のみで登録はブロックしない。
+const INVOICE_NUMBER_RE = /^T\d{13}$/;
 
 // Claude model. Switch here if needed.
 const MODEL = 'claude-sonnet-4-6';
@@ -26,14 +29,36 @@ export function ScanTab() {
   const accounts = useCollection(repos.cashbookAccounts);
   const depts    = useCollection(repos.cashbookDepts);
 
-  const [files, setFiles]       = useState([]);   // File[] selected
-  const [results, setResults]   = useState([]);   // parsed + form state
+  const [files, setFiles]       = useState([]);   // [{ id, file, previewUrl }]
+  const [results, setResults]   = useState([]);   // [{ id, file, previewUrl, data, form, status, error? }]
   const [progress, setProgress] = useState(null); // {current,total,label}
   const [err, setErr]           = useState(null);
   const [apiKey, setApiKey]     = useState(getClaudeApiKey());
   const [threshold, setThreshold] = useState(
     () => Number(localStorage.getItem(THRESHOLD_LS_KEY)) || DEFAULT_THRESHOLD
   );
+
+  // 非同期処理（連続登録・登録中の編集）から常に最新 state を読むための同期ミラー。
+  // setResults/setFiles を直接呼ばず、必ずこのセッターを通す。
+  const filesRef   = useRef(files);
+  const resultsRef = useRef(results);
+  function setFilesSync(updater) {
+    filesRef.current = typeof updater === 'function' ? updater(filesRef.current) : updater;
+    setFiles(filesRef.current);
+  }
+  function setResultsSync(updater) {
+    resultsRef.current = typeof updater === 'function' ? updater(resultsRef.current) : updater;
+    setResults(resultsRef.current);
+  }
+
+  // アンマウント時に残っているプレビューURLをすべて解放
+  useEffect(() => () => {
+    const urls = new Set([
+      ...filesRef.current.map(f => f.previewUrl),
+      ...resultsRef.current.map(r => r.previewUrl),
+    ]);
+    for (const u of urls) if (u) URL.revokeObjectURL(u);
+  }, []);
 
   // Re-read API key when tab becomes visible (user may have set it in Settings).
   useEffect(() => {
@@ -56,18 +81,38 @@ export function ScanTab() {
         setErr(`${f.name} は 10MB を超えています。スキップします。`);
         continue;
       }
-      valid.push(f);
+      // プレビューURLはここで一度だけ生成し、削除/クリア/アンマウント時に revoke する
+      valid.push({
+        id: uid('file_'),
+        file: f,
+        previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+      });
     }
-    setFiles(prev => [...prev, ...valid]);
+    setFilesSync(prev => [...prev, ...valid]);
   }
 
-  function removeFile(idx) {
-    setFiles(prev => prev.filter((_, i) => i !== idx));
+  // URL を解放してよいのは、files / results のどちらからも参照されなくなったときだけ
+  function revokeIfUnused(url) {
+    if (!url) return;
+    const stillUsed = filesRef.current.some(f => f.previewUrl === url)
+      || resultsRef.current.some(r => r.previewUrl === url);
+    if (!stillUsed) URL.revokeObjectURL(url);
+  }
+
+  function removeFile(id) {
+    const item = filesRef.current.find(f => f.id === id);
+    setFilesSync(prev => prev.filter(f => f.id !== id));
+    revokeIfUnused(item?.previewUrl);
   }
 
   function clearAll() {
-    setFiles([]);
-    setResults([]);
+    const urls = new Set([
+      ...filesRef.current.map(f => f.previewUrl),
+      ...resultsRef.current.map(r => r.previewUrl),
+    ]);
+    setFilesSync([]);
+    setResultsSync([]);
+    for (const u of urls) if (u) URL.revokeObjectURL(u);
     setErr(null);
   }
 
@@ -79,54 +124,81 @@ export function ScanTab() {
     if (!files.length) return;
 
     setErr(null);
-    setResults([]);
+    setResultsSync([]);
     const acctNames = asArray(accounts.data).map(a => a.name);
     const deptNames = asArray(depts.data).map(d => d.name);
 
+    const items = [...filesRef.current];
     const out = [];
-    for (let i = 0; i < files.length; i++) {
-      setProgress({ current: i, total: files.length, label: files[i].name });
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      setProgress({ current: i, total: items.length, label: item.file.name });
       try {
-        const parsed = await analyzeOne(files[i], apiKey, acctNames, deptNames);
+        const parsed = await analyzeOne(item.file, apiKey, acctNames, deptNames);
         out.push({
           id: uid('scan_'),
-          file: files[i],
-          previewUrl: URL.createObjectURL(files[i]),
+          file: item.file,
+          previewUrl: item.previewUrl, // ファイル選択時に生成したURLを共有（再生成しない）
           data: parsed,
           // Writable fields (user can edit before register)
           form: normalizeResult(parsed, acctNames, deptNames),
           status: 'ready',
         });
       } catch (e) {
-        console.error('[scan] analyze failed for', files[i].name, e);
+        console.error('[scan] analyze failed for', item.file.name, e);
         out.push({
           id: uid('scan_'),
-          file: files[i],
-          previewUrl: URL.createObjectURL(files[i]),
+          file: item.file,
+          previewUrl: item.previewUrl,
           data: null,
           error: e.message || String(e),
           status: 'error',
         });
       }
-      setResults([...out]);  // incremental render
+      setResultsSync([...out]);  // incremental render
     }
     setProgress(null);
   }
 
-  async function registerOne(idx) {
-    setResults(prev => prev.map((r, i) => i === idx ? { ...r, status: 'uploading' } : r));
-    const r = results[idx];
+  function patchResult(id, patch) {
+    setResultsSync(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+
+  /** 登録前の入力検証（ledger.js 手入力と同等）。不備メッセージの配列を返す。 */
+  function validateForm(f) {
+    const errs = [];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || '')) errs.push('日付は YYYY-MM-DD 形式で入力してください');
+    if (!(f.vendor || '').trim()) errs.push('取引先は必須です');
+    const amt = Number(f.amount);
+    if (!amt || amt <= 0) errs.push('金額は正の数値で入力してください');
+    return errs;
+  }
+
+  async function registerOne(id) {
+    // 常に最新 state を ID で参照（stale index / 破棄済みカード対策）
+    const r = resultsRef.current.find(x => x.id === id);
+    if (!r) return;                   // 破棄済みはスキップ
+    if (r.status !== 'ready') return; // 二重登録防止（uploading/registered）・解析失敗カードは登録不可
+
+    const errs = validateForm(r.form);
+    if (errs.length) {
+      patchResult(id, { error: errs.join(' / ') });
+      return;
+    }
+
+    patchResult(id, { status: 'uploading', error: null });
+    let uploaded = null;
     try {
       // Upload original file to Firebase Storage
-      const uploaded = await uploadFile(r.file, 'cashbook', r.form.date.substring(0, 7));
+      uploaded = await uploadFile(r.file, 'cashbook', r.form.date.substring(0, 7));
       // Save cashbook entry
       await repos.cashbook.upsert({
         id: uid('cb_'),
         date: r.form.date,
-        vendor: r.form.vendor,
+        vendor: r.form.vendor.trim(),
         category: r.form.category,
         dept: r.form.dept,
-        amount: Number(r.form.amount) || 0,
+        amount: Math.round(Number(r.form.amount)) || 0,
         reducedTax: !!r.form.reducedTax,
         hasInvoice: !!r.form.hasInvoice,
         invoiceNumber: r.form.invoiceNumber || '',
@@ -137,34 +209,35 @@ export function ScanTab() {
         storagePath: uploaded.storagePath,
         originalFileName: uploaded.originalName,
       });
-      setResults(prev => prev.map((x, i) => i === idx ? { ...x, status: 'registered' } : x));
+      patchResult(id, { status: 'registered' });
     } catch (e) {
       console.error('[scan] register failed', e);
-      setResults(prev => prev.map((x, i) => i === idx ? { ...x, status: 'ready', error: e.message || String(e) } : x));
+      // Storage 孤児防止: アップロード成功後に upsert が失敗したらロールバック
+      if (uploaded?.storagePath) {
+        try { await deleteFile(uploaded.storagePath); }
+        catch (e2) { console.warn('[scan] rollback delete failed (orphan left):', uploaded.storagePath, e2); }
+      }
+      patchResult(id, { status: 'ready', error: e.message || String(e) });
     }
   }
 
   async function registerAutoEligible() {
-    const indices = results
-      .map((r, i) => ({ r, i }))
-      .filter(x => x.r.status === 'ready' && (x.r.data?.confidence || 0) >= threshold)
-      .map(x => x.i);
-    for (const i of indices) {
-      await registerOne(i);
+    const ids = resultsRef.current
+      .filter(r => r.status === 'ready' && (r.data?.confidence || 0) >= threshold)
+      .map(r => r.id);
+    for (const id of ids) {
+      await registerOne(id); // 破棄済み・状態変化済みは registerOne 側でスキップされる
     }
   }
 
-  function updateForm(idx, patch) {
-    setResults(prev => prev.map((r, i) => i === idx ? { ...r, form: { ...r.form, ...patch } } : r));
+  function updateForm(id, patch) {
+    setResultsSync(prev => prev.map(r => r.id === id ? { ...r, form: { ...r.form, ...patch } } : r));
   }
 
-  function removeResult(idx) {
-    setResults(prev => {
-      const next = [...prev];
-      const removed = next.splice(idx, 1)[0];
-      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-      return next;
-    });
+  function removeResult(id) {
+    const removed = resultsRef.current.find(r => r.id === id);
+    setResultsSync(prev => prev.filter(r => r.id !== id));
+    revokeIfUnused(removed?.previewUrl);
   }
 
   const autoCount = results.filter(r => r.status === 'ready' && (r.data?.confidence || 0) >= threshold).length;
@@ -241,17 +314,16 @@ export function ScanTab() {
           `}
         </div>
 
-        ${results.map((r, i) => html`
+        ${results.map(r => html`
           <${ResultCard}
             key=${r.id}
             result=${r}
-            index=${i}
             accounts=${asArray(accounts.data)}
             depts=${asArray(depts.data)}
             threshold=${threshold}
-            onFormChange=${(patch) => updateForm(i, patch)}
-            onRegister=${() => registerOne(i)}
-            onRemove=${() => removeResult(i)}
+            onFormChange=${(patch) => updateForm(r.id, patch)}
+            onRegister=${() => registerOne(r.id)}
+            onRemove=${() => removeResult(r.id)}
           />
         `)}
       `}
@@ -336,8 +408,8 @@ function FileList({ files, onRemove }) {
         選択中のファイル (${files.length}枚)
       </div>
       <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        ${files.map((f, i) => html`
-          <div key=${i} style=${{
+        ${files.map(item => html`
+          <div key=${item.id} style=${{
             position: 'relative',
             width: 84, height: 84,
             borderRadius: 10, overflow: 'hidden',
@@ -345,11 +417,11 @@ function FileList({ files, onRemove }) {
             background: 'var(--bg-alt)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            ${f.type.startsWith('image/')
-              ? html`<img src=${URL.createObjectURL(f)}
+            ${item.previewUrl
+              ? html`<img src=${item.previewUrl}
                           style=${{ width: '100%', height: '100%', objectFit: 'cover' }} />`
               : html`<div style=${{ fontSize: 28 }}>📄</div>`}
-            <button onClick=${(e) => { e.stopPropagation(); onRemove(i); }}
+            <button onClick=${(e) => { e.stopPropagation(); onRemove(item.id); }}
                     style=${{
                       position: 'absolute', top: 2, right: 2,
                       width: 20, height: 20, borderRadius: '50%',
@@ -432,13 +504,19 @@ function ResultCard({ result, accounts, depts, threshold, onFormChange, onRegist
               ${isHigh && html`<span style=${{ fontSize: 11, color: 'var(--success)' }}>→ 自動登録対象</span>`}
             </div>
             <div style=${{ display: 'flex', gap: 6 }}>
-              <button class="btn" onClick=${onRegister}
+              <button class="btn" onClick=${onRegister} disabled=${result.status !== 'ready'}
                       style=${{ background: 'var(--success)', boxShadow: '0 1px 3px rgba(16,185,129,0.25)' }}>
                 ✓ 登録
               </button>
               <button class="btn btn-ghost" onClick=${onRemove}>破棄</button>
             </div>
           </div>
+
+          ${result.error && html`
+            <div class="note note-err" style=${{ marginBottom: 10, fontSize: 12 }}>
+              ${result.error}
+            </div>
+          `}
 
           <div style=${{
             display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
@@ -480,6 +558,12 @@ function ResultCard({ result, accounts, depts, threshold, onFormChange, onRegist
               <${Field} label="インボイス番号" value=${result.form.invoiceNumber}
                        onInput=${v => onFormChange({ invoiceNumber: v })}
                        placeholder="T0000000000000" mono />
+              ${(result.form.invoiceNumber || '').trim()
+                && !INVOICE_NUMBER_RE.test(result.form.invoiceNumber.trim()) && html`
+                <div style=${{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+                  ⚠ 登録番号が T+13桁 の形式と一致しません（例: T1234567890123）。このまま登録はできます。
+                </div>
+              `}
             </div>
           `}
           ${result.data?.notes && html`

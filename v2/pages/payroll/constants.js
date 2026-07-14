@@ -177,7 +177,13 @@ export const STD_REMUNERATION = [
 export const PENSION_CAP = 650000;
 
 // ---- 年収の壁 -------------------------------------------------------------
+// 令和7年度税制改正（2025年分以降）で所得税側の壁が変更された:
+//  - 103万円 → 123万円（扶養控除等の所得要件 48万→58万 + 給与所得控除最低 55万→65万）
+//  - 本人に所得税が発生するラインは実質160万円（基礎控除95万 + 給与所得控除65万）
+//  - 配偶者特別控除の満額対象も160万円まで拡大
+// 社会保険側（106万・130万）は変更なし。
 
+/** 〜2024年分の壁（旧制度） */
 export const INCOME_WALLS = [
   { threshold: 1030000, label: '103万円の壁',
     description: '本人に所得税が発生。配偶者控除の対象外に。',
@@ -195,3 +201,27 @@ export const INCOME_WALLS = [
     description: '配偶者特別控除の対象外に。',
   },
 ];
+
+/** 2025年分以降の壁（令和7年度税制改正反映） */
+export const INCOME_WALLS_2025 = [
+  { threshold: 1060000, label: '106万円の壁',
+    description: '従業員51人以上企業・週20h以上で社会保険加入義務（変更なし）。',
+  },
+  { threshold: 1230000, label: '123万円の壁',
+    description: '扶養控除・配偶者控除の対象外に（旧103万円の壁。令和7年改正で引上げ）。',
+  },
+  { threshold: 1300000, label: '130万円の壁',
+    description: '社会保険の扶養から外れる。健康保険・年金を自己負担（変更なし）。',
+  },
+  { threshold: 1600000, label: '160万円の壁',
+    description: '本人に所得税が発生（基礎控除95万+給与所得控除65万）。配偶者特別控除の満額対象もここまで。',
+  },
+  { threshold: 2010000, label: '201万円の壁',
+    description: '配偶者特別控除の対象外に。',
+  },
+];
+
+/** 対象年に応じた年収の壁リスト（year >= 2025 で改正後） */
+export function getIncomeWalls(year) {
+  return Number(year) >= 2025 ? INCOME_WALLS_2025 : INCOME_WALLS;
+}

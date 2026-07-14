@@ -57,7 +57,7 @@ export function BanksTab() {
         `}
 
       ${editing && html`
-        <${BankModal} initial=${editing} onClose=${() => setEditing(null)} />
+        <${BankModal} initial=${editing} banks=${data || []} onClose=${() => setEditing(null)} />
       `}
     </div>
   `;
@@ -92,7 +92,7 @@ function BankRow({ bank, onEdit }) {
   `;
 }
 
-function BankModal({ initial, onClose }) {
+function BankModal({ initial, banks, onClose }) {
   const isNew = !initial.id;
   const [form, setForm] = useState({ ...EMPTY, ...initial });
   const [busy, setBusy] = useState(false);
@@ -106,12 +106,9 @@ function BankModal({ initial, onClose }) {
     if (!form.accountNumber.trim()) { setErr('口座番号は必須です'); return; }
     setBusy(true);
     try {
-      // If this one is default, unset default from others
-      if (form.isDefault) {
-        // Note: would need a batch update in production; for simplicity let admin toggle manually
-      }
+      const id = initial.id || uid('bank_');
       await repos.invoiceBanks.upsert({
-        id: initial.id || uid('bank_'),
+        id,
         bankName: form.bankName.trim(),
         branch: (form.branch || '').trim(),
         branchCode: (form.branchCode || '').trim(),
@@ -121,6 +118,13 @@ function BankModal({ initial, onClose }) {
         accountHolderKana: (form.accountHolderKana || '').trim(),
         isDefault: !!form.isDefault,
       });
+      // デフォルトの排他: この口座をデフォルトにしたら他口座の isDefault を落とす
+      if (form.isDefault) {
+        const others = (banks || []).filter(b => b.isDefault && b.id !== id);
+        await Promise.all(others.map(b =>
+          repos.invoiceBanks.upsert({ id: b.id, isDefault: false })
+        ));
+      }
       onClose();
     } catch (e) {
       console.error('[banks] save failed', e);

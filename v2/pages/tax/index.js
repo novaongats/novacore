@@ -15,13 +15,13 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, useDoc, where } from '../../store.js';
-import { dayjs, thisMonth, monthLabel, addMonths, asArray } from '../../shared.js';
+import { dayjs, thisMonth, monthLabel, addMonths, asArray, toCsv, downloadTextFile } from '../../shared.js';
 import { useDepts } from '../../depts.js';
 import { getRatesFor } from '../payroll/calc.js';
 import {
   buildPL, buildSalesLedger, buildExpenseLedger, buildCashbookDoc,
   buildTaxSummary, buildWageLedger, buildInvoiceList, buildTrend,
-  downloadCsv,
+  downloadCsv, specToRows,
 } from './data.js';
 import { TaxDocOverlay } from './print.js';
 
@@ -65,7 +65,13 @@ export function TaxReportPage() {
   const empRatesQ = useDoc(repos.settings, 'payroll_employment_rates');
 
   const loading = catsQ.loading || entriesQ.loading || costsQ.loading
-    || cashbookQ.loading || payrollQ.loading || invoicesQ.loading;
+    || cashbookQ.loading || payrollQ.loading || bonusQ.loading
+    || invoicesQ.loading || ratesQ.loading || empRatesQ.loading;
+
+  // 購読エラー（権限・ネットワーク等）は集約して表示し、永久「読込中」を防ぐ
+  const loadError = catsQ.error || entriesQ.error || costsQ.error
+    || cashbookQ.error || payrollQ.error || bonusQ.error
+    || invoicesQ.error || ratesQ.error || empRatesQ.error;
 
   const data = useMemo(() => {
     const inMonth = (d) => (d || '').startsWith(month);
@@ -113,12 +119,22 @@ export function TaxReportPage() {
 
   function csv(docId) {
     const spec = buildSpec(docId);
-    if (spec) downloadCsv(spec, `${spec.id}_${month}${scope === 'all' ? '' : '_' + scope}`);
+    if (spec) downloadCsv(spec, spec.filenameBase || `${spec.id}_${month}`);
   }
 
-  // 月次一式CSV（全書類をまとめて出力）
+  // 月次一式CSV: 8連続ダウンロードはブラウザにブロックされるため、
+  // 全書類を1つの結合CSV（書類ごとに【書類名】ヘッダー+空行区切り）で出力する。
   function exportAllCsv() {
-    for (const d of DOCS) csv(d.id);
+    const rows = [];
+    for (const d of DOCS) {
+      const spec = buildSpec(d.id);
+      if (!spec) continue;
+      if (rows.length) rows.push([], []);
+      rows.push([`【${spec.title}】`]);
+      rows.push(...specToRows(spec));
+    }
+    const name = `tax-docs-all_${month}${scope === 'all' ? '' : '_' + scope}.csv`;
+    downloadTextFile(toCsv(rows), name);
   }
 
   const scopeOptions = [
@@ -154,12 +170,17 @@ export function TaxReportPage() {
 
         <div style=${{ marginLeft: 'auto' }}>
           <button class="btn btn-ghost" onClick=${exportAllCsv} disabled=${loading}>
-            📥 全書類をCSVで一括出力
+            📥 全書類を1つのCSVにまとめて出力
           </button>
         </div>
       </div>
 
-      ${loading && html`<div style=${{ color: 'var(--text-3)', padding: 8 }}>データ読込中...</div>`}
+      ${loadError && html`
+        <div class="note note-err" style=${{ marginBottom: 14 }}>
+          データの読込に失敗しました（権限またはネットワーク）: ${loadError.message || String(loadError)}
+        </div>
+      `}
+      ${loading && !loadError && html`<div style=${{ color: 'var(--text-3)', padding: 8 }}>データ読込中...</div>`}
 
       <!-- 書類カード -->
       <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>

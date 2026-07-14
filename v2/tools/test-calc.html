@@ -18,17 +18,21 @@
 </head>
 <body>
 <h1>給与計算エンジン 自動テスト（ゴールデンテスト）</h1>
-<p>calc.js / tax-table.js をブラウザ内で直接検証します。Firebase接続は不要です。</p>
+<p>calc.js / tax-table.js / year-end.js / bonus.js / constants.js の計算ロジックをブラウザ内で直接検証します。
+（year-end.js / bonus.js 経由で store.js が読み込まれますが、テスト自体は Firebase 接続不要の純関数のみを対象とします）</p>
 <div id="out"></div>
 
 <script type="module">
 import {
   calcMonthlyPaycheck, calcBonusPaycheck, getRatesFor,
   getHealthStandard, snapToStandard, roundShakai,
-  splitCommuteAllowance, getInsuranceStatus,
+  splitCommuteAllowance, carCommuteCap, getInsuranceStatus,
   calcHealthPremium, calcPensionPremium, calcChildSupportPremium,
 } from '../pages/payroll/calc.js';
 import { calcIncomeTaxForMonth, getBonusTaxRateForMonth } from '../pages/payroll/tax-table.js';
+import { salaryIncomeDeduction, basicDeduction, calcAnnualTax } from '../pages/payroll/year-end.js';
+import { prevMonthTaxBasis, pickPrevMonthRecords } from '../pages/payroll/bonus.js';
+import { getIncomeWalls } from '../pages/payroll/constants.js';
 
 const out = document.getElementById('out');
 let pass = 0, fail = 0;
@@ -169,6 +173,74 @@ eq('賞与: 所得税', b1.incomeTax, Math.floor((500000 - 73450) * 0.04084));
 eq('賞与: 1000円未満切捨て (500,999円→標準賞与50万)',
    calcBonusPaycheck(emp1, { month: '2026-07', amount: 500999, prevMonthAfterSocial: 255930, rates: rates8 }).health,
    24625);
+
+// ============ 10. 年末調整: 年度別パラメータ（令和7年度税制改正） ============
+section('10. 年末調整: 給与所得控除・基礎控除の年度切替（令和7年度税制改正）');
+// 給与所得控除の最低保障: 〜2024=55万 / 2025〜=65万（収入190万円以下は実質65万）
+eq('給与所得控除 収入100万 (2024年分)', salaryIncomeDeduction(1000000, 2024), 550000);
+eq('給与所得控除 収入100万 (2025年分→最低65万)', salaryIncomeDeduction(1000000, 2025), 650000);
+eq('給与所得控除 収入170万 (2024年分: 0.4y−10万)', salaryIncomeDeduction(1700000, 2024), 580000);
+eq('給与所得控除 収入170万 (2025年分→65万に底上げ)', salaryIncomeDeduction(1700000, 2025), 650000);
+eq('給与所得控除 収入190万 (2025年分: 実質65万の上端)', salaryIncomeDeduction(1900000, 2025), 650000);
+eq('給与所得控除 収入200万 (2025年分: 0.3y+8万=68万で底を超える)', salaryIncomeDeduction(2000000, 2025), 680000);
+// 基礎控除: 合計所得金額に応じた段階（88/68/63万の上乗せは令和7・8年分限定）
+eq('基礎控除 所得132万以下 (2025)', basicDeduction(1320000, 2025), 950000);
+eq('基礎控除 所得132万超 (2025→88万)', basicDeduction(1320001, 2025), 880000);
+eq('基礎控除 所得336万超 (2025→68万)', basicDeduction(3360001, 2025), 680000);
+eq('基礎控除 所得489万超 (2025→63万)', basicDeduction(4890001, 2025), 630000);
+eq('基礎控除 所得655万超 (2025→58万)', basicDeduction(6550001, 2025), 580000);
+eq('基礎控除 所得2350万超 (2025→従来の逓減48万)', basicDeduction(23600000, 2025), 480000);
+eq('基礎控除 所得132万超 (2027→上乗せ終了で58万)', basicDeduction(1320001, 2027), 580000);
+eq('基礎控除 所得132万以下 (2027→95万は恒久)', basicDeduction(1320000, 2027), 950000);
+eq('基礎控除 (2024→旧48万)', basicDeduction(5000000, 2024), 480000);
+// 年税額 end-to-end（年収300万・社保44万・扶養1人）
+eq('年税額 2025年分（基礎控除88万）', calcAnnualTax(3000000, 440000, 1, 2025).totalTax, 16336);
+eq('年税額 2024年分（基礎控除48万）', calcAnnualTax(3000000, 440000, 1, 2024).totalTax, 36756);
+
+// ============ 11. 賞与: 前月給与の参照と課税ベース ============
+section('11. 賞与: 前月レコードの選択と税率基礎額');
+// 税率基礎額 = 前月の「社保控除後の給与等」= rec.taxable（非課税通勤手当除外済み）
+eq('taxable があればそのまま使う', prevMonthTaxBasis({ taxable: 255930, gross: 315000, social: 44070 }), 255930);
+eq('taxable の無い旧データは gross−非課税通勤−社保',
+   prevMonthTaxBasis({ gross: 315000, commuteNonTaxable: 15000, social: 44070 }), 255930);
+eq('レコード無し → 0', prevMonthTaxBasis(null), 0);
+// 賞与月より前の月のうち最新のレコードを選ぶ（未来月・当月は使わない）
+const bonusRecs = [
+  { empId: 'a', month: '2026-07', taxable: 1 },
+  { empId: 'a', month: '2026-06', taxable: 2 },
+  { empId: 'a', month: '2026-05', taxable: 3 },
+  { empId: 'b', month: '2026-08', taxable: 9 },
+];
+eq('賞与月2026-07 → aは2026-06を採用', pickPrevMonthRecords(bonusRecs, '2026-07').get('a')?.taxable, 2);
+eq('賞与月2026-07 → b（未来月のみ）は該当なし', pickPrevMonthRecords(bonusRecs, '2026-07').get('b'), undefined);
+eq('賞与月2026-05 → aは該当なし', pickPrevMonthRecords(bonusRecs, '2026-05').get('a'), undefined);
+
+// ============ 12. 年収の壁（年度切替） ============
+section('12. 年収の壁: 2024年以前と2025年以降の切替');
+eq('2024年 → 103万の壁あり', getIncomeWalls(2024).map(w => w.threshold),
+   [1030000, 1060000, 1300000, 1500000, 2010000]);
+eq('2025年 → 123万・160万に変更', getIncomeWalls(2025).map(w => w.threshold),
+   [1060000, 1230000, 1300000, 1600000, 2010000]);
+eq('2026年も改正後', getIncomeWalls(2026).some(w => w.threshold === 1230000), true);
+
+// ============ 13. マイカー通勤の距離段階 + 標準報酬の通勤手当込み判定 ============
+section('13. マイカー通勤の距離段階非課税限度額（施行令20条の2）');
+eq('片道1km → 全額課税', carCommuteCap(1, '2026-07'), 0);
+eq('片道9km → 4,200円', carCommuteCap(9, '2026-07'), 4200);
+eq('片道12km → 7,300円（令和7年改正後）', carCommuteCap(12, '2026-07'), 7300);
+eq('片道12km 2025-03支払分 → 旧額7,100円', carCommuteCap(12, '2025-03'), 7100);
+eq('片道60km 2025-06 → 38,700円（55km以上）', carCommuteCap(60, '2025-06'), 38700);
+eq('片道100km 2025-06 → 65km以上区分なし=38,700円', carCommuteCap(100, '2025-06'), 38700);
+eq('片道100km 2026-07 → 95km以上=66,400円', carCommuteCap(100, '2026-07'), 66400);
+eq('距離指定ありの分離: 2万円・12km', splitCommuteAllowance(20000, false, 12, '2026-07').nonTaxable, 7300);
+eq('距離未入力は従来31,600円上限', splitCommuteAllowance(50000, false, null, '2026-07').nonTaxable, 31600);
+eq('距離未入力フラグ（注記用）', splitCommuteAllowance(50000, false, null, '2026-07').distanceUnknown, true);
+eq('手当0円なら距離未入力でも注記しない', splitCommuteAllowance(0, false, null, '2026-07').distanceUnknown, false);
+// 標準報酬の自動判定は 基本給+諸手当+通勤手当（総額）で行う
+const c5 = calcMonthlyPaycheck(emp2, { month: '2026-07', rates: rates8 });
+eq('標準報酬の自動判定は通勤手当込み（30万+1.5万→標報32万）', c5.stdRemuneration, 320000);
+const c6 = calcMonthlyPaycheck(emp1, { month: '2026-07', allowance: 20000, rates: rates8 });
+eq('標準報酬の自動判定は諸手当込み（30万+2万→標報32万）', c6.stdRemuneration, 320000);
 
 // ============ 結果 ============
 const sum = document.createElement('div');

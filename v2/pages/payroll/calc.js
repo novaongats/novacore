@@ -5,7 +5,8 @@
    - 社会保険料: 標準報酬月額 × 料率 ÷ 2（端数は50銭以下切捨て・50銭超切上げ）
    - 所得税: tax-table.js（月額表/電算機特例を年次で自動切替）
    - 子ども・子育て支援金: 2026年4月〜、健保加入者対象
-   - 通勤手当: 非課税限度額を自動分離（所得税法施行令20条の2）
+   - 通勤手当: 非課税限度額を自動分離（所得税法施行令20条の2、
+     マイカー等は片道距離の段階別上限に対応）
    - 年齢による保険切替: 40/65/70/75歳（生年月日登録時のみ自動判定）
    - 産休・育休: 社会保険料免除（健保法159条等）
    ============================================================ */
@@ -195,16 +196,59 @@ export function isOnLeave(emp) {
   return !!(emp.onMaternityLeave || emp.onChildcareLeave);
 }
 
+// ---- マイカー等の距離段階 非課税限度額（所得税法施行令20条の2）--------------
+// 各行: [片道距離の上限(km未満), 月額上限(円)]。2km未満は全額課税。
+// 出典: 国税庁タックスアンサー No.2585 / 「通勤手当の非課税限度額の改正について」
+//  - 〜2025-03支払分: 旧額（上限31,600円）
+//  - 2025-04〜: 令和7年11月改正の引上げ額（令和7年4月1日以後支払分に遡及適用）
+//  - 2026-04〜: 65km以上の新区分を追加（上限66,400円）
+const CAR_COMMUTE_TIERS_OLD = [
+  [2, 0], [10, 4200], [15, 7100], [25, 12900], [35, 18700],
+  [45, 24400], [55, 28000], [Infinity, 31600],
+];
+const CAR_COMMUTE_TIERS_R7 = [
+  [2, 0], [10, 4200], [15, 7300], [25, 13500], [35, 19700],
+  [45, 25900], [55, 32300], [Infinity, 38700],
+];
+const CAR_COMMUTE_TIERS_R8 = [
+  [2, 0], [10, 4200], [15, 7300], [25, 13500], [35, 19700],
+  [45, 25900], [55, 32300], [65, 38700], [75, 45700], [85, 52700],
+  [95, 59600], [Infinity, 66400],
+];
+
+/** マイカー等通勤の月額非課税上限（片道距離 km・対象月から判定） */
+export function carCommuteCap(distanceKm, month) {
+  const d = Number(distanceKm) || 0;
+  const tiers = (month && month < '2025-04') ? CAR_COMMUTE_TIERS_OLD
+    : (month && month < '2026-04') ? CAR_COMMUTE_TIERS_R7
+    : CAR_COMMUTE_TIERS_R8;
+  for (const [upper, cap] of tiers) {
+    if (d < upper) return cap;
+  }
+  return tiers[tiers.length - 1][1];
+}
+
 /**
  * 通勤手当の課税・非課税分離。
- * 公共交通機関: 月150,000円まで非課税。マイカー等: 距離未登録のため
- * 最高額31,600円（片道55km以上相当）を上限として適用。
+ * 公共交通機関: 月150,000円まで非課税。
+ * マイカー等: 片道距離(km)の段階別上限（carCommuteCap）。
+ * 距離未入力の既存データは従来どおり31,600円を上限とし、
+ * distanceUnknown フラグで注記できるようにする。
  */
-export function splitCommuteAllowance(monthly, isPublicTransport = true) {
+export function splitCommuteAllowance(monthly, isPublicTransport = true, distanceKm = null, month = null) {
   const m = Math.max(0, Number(monthly) || 0);
-  const cap = isPublicTransport ? 150000 : 31600;
+  let cap;
+  let distanceUnknown = false;
+  if (isPublicTransport) {
+    cap = 150000;
+  } else if (Number(distanceKm) > 0) {
+    cap = carCommuteCap(distanceKm, month);
+  } else {
+    cap = 31600;  // 距離未入力: 旧上限31,600円で保守的に計算（要距離登録）
+    distanceUnknown = m > 0;
+  }
   const nonTaxable = Math.min(m, cap);
-  return { total: m, nonTaxable, taxable: m - nonTaxable, cap };
+  return { total: m, nonTaxable, taxable: m - nonTaxable, cap, distanceUnknown };
 }
 
 // ---- Full monthly paycheck calculation ------------------------------------
@@ -245,6 +289,8 @@ export function calcMonthlyPaycheck(emp, input = {}) {
   const commute = splitCommuteAllowance(
     input.commute ?? emp.commuteAllowanceMonthly ?? 0,
     emp.commuteIsPublicTransport !== false,
+    emp.commuteDistanceKm,
+    month,
   );
 
   const gross = basePay + commission + allowance + commute.total - deduction;
@@ -254,9 +300,11 @@ export function calcMonthlyPaycheck(emp, input = {}) {
   const onLeave = isOnLeave(emp);
 
   // 標準報酬月額: 0 または未設定は「自動計算」
+  // 自動判定の報酬月額は基本給のみでなく、諸手当・通勤手当（非課税分含む）
+  // を含めた金額で判定する（健康保険法上の「報酬」に通勤手当も含まれるため）。
   const stdHealth  = Number(emp.stdRemuneration) > 0
     ? Number(emp.stdRemuneration)
-    : getHealthStandard(basePay);
+    : getHealthStandard(basePay + allowance + commute.total);
   const stdPension = Math.min(stdHealth, PENSION_CAP);
 
   const healthRate = (rates.health?.[emp.prefecture]
@@ -285,6 +333,12 @@ export function calcMonthlyPaycheck(emp, input = {}) {
   const totalDed = social + incomeTax + residentTax;
   const net = gross - totalDed;
 
+  let insuranceNotes = ins.notes;
+  if (commute.distanceUnknown) {
+    insuranceNotes = (insuranceNotes ? insuranceNotes + ' / ' : '')
+      + 'マイカー通勤: 距離未入力のため非課税上限31,600円で計算（従業員マスタで片道距離を登録してください）';
+  }
+
   return {
     basePay, commission, allowance, deduction,
     commuteTotal: commute.total, commuteNonTaxable: commute.nonTaxable,
@@ -293,7 +347,7 @@ export function calcMonthlyPaycheck(emp, input = {}) {
     health, pension, care, childSupport, employment,
     social, taxable, incomeTax, residentTax,
     totalDed, net,
-    age: ins.age, insuranceNotes: ins.notes, onLeave,
+    age: ins.age, insuranceNotes, onLeave,
   };
 }
 

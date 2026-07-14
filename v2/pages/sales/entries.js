@@ -54,13 +54,18 @@ export function EntriesTab() {
 
       <${KpiRow} entries=${entries.data} catMap=${catMap} />
 
-      ${cats.data.length === 0 ? html`
+      ${cats.loading ? '' : cats.data.length === 0 ? html`
         <div class="note note-warn" style=${{ marginTop: 16 }}>
           売上カテゴリが未登録です。先に
           <a onClick=${(e) => { e.preventDefault();
             /* Parent tab switching not wired here; user can click the tab manually. */
           }} style=${{ color: 'var(--primary)', cursor: 'pointer' }}>「カテゴリ」タブ</a>
           からカテゴリを作成してください。
+        </div>
+      ` : activeCats.length === 0 ? html`
+        <div class="note note-warn" style=${{ marginTop: 16 }}>
+          入力可能なカテゴリがありません（全カテゴリがアーカイブ済み部門に属しています）。
+          「カテゴリ」タブでカテゴリの部門を変更するか、設定で部門のアーカイブを解除してください。
         </div>
       ` : html`
         <${QuickAddForm} cats=${activeCats} defaultMonth=${month} />
@@ -110,13 +115,17 @@ function MonthBar({ month, onChange }) {
 
 function KpiRow({ entries, catMap }) {
   const depts = useDepts();
-  const total = sumBy(entries, e => e.amount);
-  const count = entries.length;
+  // v1移行データの type:'expense'（手入力経費）は売上に合算しない
+  const revEntries = entries.filter(e => e.type !== 'expense');
+  const expEntries = entries.filter(e => e.type === 'expense');
+  const expenseTotal = sumBy(expEntries, e => e.amount);
+  const total = sumBy(revEntries, e => e.amount);
+  const count = revEntries.length;
   const avg   = count > 0 ? Math.round(total / count) : 0;
 
   // By-dept breakdown using category lookup; fall back to entry.dept for legacy rows.
   const deptTotals = {};
-  for (const e of entries) {
+  for (const e of revEntries) {
     const cat = catMap.get(e.catId);
     const dept = cat?.dept || e.dept || 'other';
     deptTotals[dept] = (deptTotals[dept] || 0) + Number(e.amount || 0);
@@ -128,6 +137,12 @@ function KpiRow({ entries, catMap }) {
       <${KpiCard} label="件数"           value=${count + ' 件'}      />
       <${KpiCard} label="平均単価"       value=${formatYen(avg)}     />
     </div>
+    ${expenseTotal > 0 && html`
+      <div class="note note-info" style=${{ marginBottom: 16 }}>
+        ※ v1移行の経費レコード ${expEntries.length}件 / ${formatYen(expenseTotal)} は売上に含めていません
+        （コストとしてホームの営業利益に反映されます）。
+      </div>
+    `}
     ${Object.keys(deptTotals).length > 0 && html`
       <div class="card" style=${{ padding: 14, marginBottom: 16 }}>
         <div style=${{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, marginBottom: 8,
@@ -302,7 +317,8 @@ function EntryList({ loading, error, entries, catMap, onEdit }) {
           }}>
             ${shortDateLabel(d)}
             <span style=${{ marginLeft: 8, color: 'var(--text-4)', fontWeight: 400 }}>
-              ${byDate.get(d).length}件 / ${formatYen(sumBy(byDate.get(d), e => e.amount))}
+              ${byDate.get(d).length}件 / ${formatYen(
+                sumBy(byDate.get(d).filter(e => e.type !== 'expense'), e => e.amount))}
             </span>
           </div>
           <div class="card" style=${{ padding: 0, overflow: 'hidden' }}>
@@ -335,6 +351,10 @@ function EntryRow({ entry, catMap, onEdit }) {
       <div style=${{ flex: 1, minWidth: 0 }}>
         <div style=${{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
           ${cat?.name || entry.memo || '(無題)'}
+          ${entry.type === 'expense' && html`<span style=${{
+            marginLeft: 6, fontSize: 10, padding: '1px 6px',
+            background: '#fee2e2', color: '#b91c1c', borderRadius: 4, fontWeight: 700,
+          }}>経費</span>`}
           ${isLegacy && html`<span style=${{
             marginLeft: 6, fontSize: 10, padding: '1px 6px',
             background: '#fef3c7', color: '#92400e', borderRadius: 4,
@@ -346,7 +366,8 @@ function EntryRow({ entry, catMap, onEdit }) {
           ${entry.memo && cat?.name && html`<span style=${{ marginLeft: 6 }}>· ${entry.memo}</span>`}
         </div>
       </div>
-      <div class="num" style=${{ fontWeight: 700, minWidth: 110, textAlign: 'right' }}>
+      <div class="num" style=${{ fontWeight: 700, minWidth: 110, textAlign: 'right',
+                                  color: entry.type === 'expense' ? 'var(--danger)' : 'var(--text)' }}>
         ${formatYen(entry.amount)}
       </div>
       <button class="btn btn-ghost" onClick=${onEdit}>編集</button>
@@ -358,17 +379,21 @@ function EntryRow({ entry, catMap, onEdit }) {
 
 function EntryModal({ initial, cats, onClose }) {
   const [date, setDate] = useState(initial.date || today());
-  const [catId, setCatId] = useState(initial.catId || cats[0]?.id || '');
+  // catId 無しレコードは先頭カテゴリを勝手にプリセレクトしない（未分類のまま保持）
+  const [catId, setCatId] = useState(initial.catId || '');
   const [amount, setAmount] = useState(String(initial.amount ?? ''));
   const [memo, setMemo] = useState(initial.memo || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
+  // 削除済みカテゴリ（マスタに存在しない catId）は専用オプションで表示＝保存内容と一致させる
+  const catKnown = !initial.catId || cats.some(c => c.id === initial.catId);
+
   async function save() {
     setErr(null);
     const amtNum = Number(String(amount).replace(/[^\d.-]/g, ''));
-    if (!date || !catId || !amtNum || amtNum <= 0) {
-      setErr('日付・カテゴリ・金額（正数）は必須です');
+    if (!date || !amtNum || amtNum <= 0) {
+      setErr('日付・金額（正数）は必須です');
       return;
     }
     setBusy(true);
@@ -376,7 +401,8 @@ function EntryModal({ initial, cats, onClose }) {
       await repos.salesEntries.upsert({
         id: initial.id,
         date,
-        catId,
+        // 未分類のまま保存可（v1移行レコードは dept で集計される）
+        catId: catId || null,
         amount: Math.round(amtNum),
         memo: memo.trim(),
         // Clear legacy markers once the user touches a record.
@@ -412,16 +438,24 @@ function EntryModal({ initial, cats, onClose }) {
         </div>
         <div style=${{ padding: 20, display: 'grid', gap: 14 }}>
           ${err && html`<div class="note note-err">${err}</div>`}
+          ${initial.type === 'expense' && html`
+            <div class="note note-info">
+              これは v1 から移行した経費レコードです（売上には合算されず、コストとして集計されます）。
+            </div>
+          `}
           <div class="field">
             <label>日付 *</label>
             <input type="date" value=${date}
                    onInput=${e => setDate(e.target.value)} disabled=${busy} />
           </div>
           <div class="field">
-            <label>カテゴリ *</label>
+            <label>カテゴリ</label>
             <select value=${catId} onChange=${e => setCatId(e.target.value)} disabled=${busy}
                     style=${inputStyle}>
-              <option value="">-- 未選択 --</option>
+              <option value="">${initial.catId ? '-- 未選択（カテゴリを外す） --' : '--（未分類のまま）--'}</option>
+              ${!catKnown && html`
+                <option value=${initial.catId}>（削除済みカテゴリ: ${initial.catId}）</option>
+              `}
               ${cats.map(c => html`
                 <option key=${c.id} value=${c.id}>${deptLabel(c.dept)} / ${c.name}</option>
               `)}

@@ -295,7 +295,8 @@ function CostSheetModal({ month, cat, costDoc, revenue, onClose }) {
       key: Math.random().toString(36).slice(2),
       type: i.type || 'misc',
       amount: String(i.amount ?? ''),
-      memo: i.memo || '',
+      // importer 由来のデータは `note` にメモが入っている。保存時は memo に統一される。
+      memo: i.memo ?? i.note ?? '',
     }))
   );
   const [busy, setBusy] = useState(false);

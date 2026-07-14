@@ -1,32 +1,49 @@
 /* ============================================================
    NOVA Core v2 — Payroll / Year-end adjustment (年末調整)
    Annualize income, recompute tax, compare with withheld.
+
+   税制パラメータは対象年で自動切替:
+   - 〜2024年分: 2020年改正（基礎控除48万・給与所得控除最低55万）
+   - 2025年分〜: 令和7年度税制改正（給与所得控除最低65万、
+     基礎控除は合計所得金額に応じ95万〜58万。88/68/63万の
+     上乗せは令和7・8年分限定、2027年分以降は95万/58万の2段階）
+   出典: 国税庁「令和７年度税制改正による所得税の基礎控除の
+   見直し等について」 https://www.nta.go.jp/users/gensen/2025kiso/
+   ※特定親族特別控除（19〜22歳）・生命保険料控除等は未対応。
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
-import { formatYen, asArray } from '../../shared.js';
+import { formatYen, asArray, toCsv, downloadTextFile } from '../../shared.js';
 import { EMP_TYPE_MAP } from './constants.js';
 
 const html = htm.bind(h);
 
-// ---- Tax calculation helpers ----------------------------------------------
+// ---- Tax calculation helpers（テスト用に export）---------------------------
 
-/** 給与所得控除 (2020年改正以降) */
-function salaryIncomeDeduction(annualIncome) {
+/**
+ * 給与所得控除。
+ * - 〜2024年分: 最低保障 55万円（2020年改正）
+ * - 2025年分〜: 最低保障 65万円（令和7年度改正。控除率の区分は不変のため、
+ *   収入190万円以下は実質65万円が適用される）
+ */
+export function salaryIncomeDeduction(annualIncome, year) {
   const y = Math.max(0, annualIncome);
-  if (y <= 1625000) return 550000;
-  if (y <= 1800000) return Math.round(y * 0.40 - 100000);
-  if (y <= 3600000) return Math.round(y * 0.30 +  80000);
-  if (y <= 6600000) return Math.round(y * 0.20 + 440000);
-  if (y <= 8500000) return Math.round(y * 0.10 + 1100000);
-  return 1950000;
+  const minDed = Number(year) >= 2025 ? 650000 : 550000;
+  let ded;
+  if      (y <= 1625000) ded = 550000;
+  else if (y <= 1800000) ded = Math.round(y * 0.40 - 100000);
+  else if (y <= 3600000) ded = Math.round(y * 0.30 +  80000);
+  else if (y <= 6600000) ded = Math.round(y * 0.20 + 440000);
+  else if (y <= 8500000) ded = Math.round(y * 0.10 + 1100000);
+  else                   ded = 1950000;
+  return Math.max(minDed, ded);
 }
 
 /** 所得税の累進計算 (基本税額) */
-function progressiveIncomeTax(taxableIncome) {
+export function progressiveIncomeTax(taxableIncome) {
   const t = Math.max(0, taxableIncome);
   if (t <= 1950000)  return Math.round(t * 0.05);
   if (t <= 3300000)  return Math.round(t * 0.10 -   97500);
@@ -37,27 +54,54 @@ function progressiveIncomeTax(taxableIncome) {
   return Math.round(t * 0.45 - 4796000);
 }
 
-/** 基礎控除 (2020改正以降) */
-function basicDeduction(annualIncome) {
-  if (annualIncome <= 24000000) return 480000;
-  if (annualIncome <= 24500000) return 320000;
-  if (annualIncome <= 25000000) return 160000;
+/**
+ * 基礎控除（合計所得金額に応じる）。
+ * - 〜2024年分: 48万円（2400万円超は逓減）
+ * - 2025年分〜（令和7年度改正）:
+ *     132万円以下 → 95万円（恒久）
+ *     132万円超336万円以下 → 88万円 ┐
+ *     336万円超489万円以下 → 68万円 ├ 令和7・8年分限定の上乗せ
+ *     489万円超655万円以下 → 63万円 ┘（2027年分以降は58万円）
+ *     655万円超2350万円以下 → 58万円（恒久）
+ *     2350万円超は従来どおり 48万/32万/16万/0円 に逓減
+ */
+export function basicDeduction(totalIncome, year) {
+  const y = Number(year) || 0;
+  const i = totalIncome;
+  if (y <= 2024) {
+    if (i <= 24000000) return 480000;
+    if (i <= 24500000) return 320000;
+    if (i <= 25000000) return 160000;
+    return 0;
+  }
+  if (i <= 1320000) return 950000;
+  if (y <= 2026) {  // 88/68/63万円の上乗せは令和7・8年分（2025・2026年分）限定
+    if (i <= 3360000) return 880000;
+    if (i <= 4890000) return 680000;
+    if (i <= 6550000) return 630000;
+  }
+  if (i <= 23500000) return 580000;
+  if (i <= 24000000) return 480000;
+  if (i <= 24500000) return 320000;
+  if (i <= 25000000) return 160000;
   return 0;
 }
 
 /** 扶養控除 (一般扶養親族) */
-function dependentDeduction(dependents) {
+export function dependentDeduction(dependents) {
   return Math.max(0, Number(dependents) || 0) * 380000;
 }
 
 /**
  * 年間所得税額計算（簡易版）
+ * @param annualGross 給与等の収入金額の年計（非課税通勤手当を除く・社保控除前）
+ * @param year        年末調整の対象年（税制パラメータの切替に使用）
  * 生命保険料控除等は未対応。実運用で必要なら追加。
  */
-function calcAnnualTax(annualGross, annualSocial, dependents) {
-  const salDed   = salaryIncomeDeduction(annualGross);
+export function calcAnnualTax(annualGross, annualSocial, dependents, year) {
+  const salDed   = salaryIncomeDeduction(annualGross, year);
   const income   = annualGross - salDed;               // 給与所得
-  const basic    = basicDeduction(income);
+  const basic    = basicDeduction(income, year);
   const depDed   = dependentDeduction(dependents);
   const taxable  = Math.max(0, income - annualSocial - basic - depDed);
   const baseTax  = progressiveIncomeTax(taxable);
@@ -110,7 +154,9 @@ export function YearEndTab() {
       const row = m.get(r.empId);
       if (!row) continue;
       row.monthsCount  += 1;
-      row.annualGross  += Number(r.gross) || 0;
+      // 「給与等の収入金額」= 課税支給額（非課税通勤手当を除く・社保控除前）。
+      // r.taxable は社保控除後の金額なのでここでは使わない。
+      row.annualGross  += Math.max(0, (Number(r.gross) || 0) - (Number(r.commuteNonTaxable) || 0));
       row.annualSocial += Number(r.social) || 0;
       row.annualWithheld += Number(r.incomeTax) || 0;
     }
@@ -122,22 +168,21 @@ export function YearEndTab() {
       row.annualWithheld += Number(b.incomeTax) || 0;
     }
     for (const row of m.values()) {
-      const calc = calcAnnualTax(row.annualGross, row.annualSocial, row.emp.dependents || 0);
+      const calc = calcAnnualTax(row.annualGross, row.annualSocial, row.emp.dependents || 0, year);
       row.calc = calc;
       row.diff = calc.totalTax - row.annualWithheld;  // +: 追徴, -: 還付
     }
     return m;
-  }, [empList, records.data, bonuses.data]);
+  }, [empList, records.data, bonuses.data, year]);
 
   function exportCsv() {
-    const header = ['氏名', '年間総支給', '社保計', '給与所得控除', '課税所得',
-                    '基礎控除', '扶養控除', '課税対象', '算出年税', '復興特別', '年税合計',
-                    '源泉徴収済', '差引（+追徴 / -還付）'];
-    const lines = [header.join(',')];
+    const rows = [['氏名', '年間収入（課税支給）', '社保計', '給与所得控除', '課税所得',
+                   '基礎控除', '扶養控除', '課税対象', '算出年税', '復興特別', '年税合計',
+                   '源泉徴収済', '差引（+追徴 / -還付）']];
     for (const emp of empList) {
       const s = summary.get(emp.id);
       if (!s) continue;
-      lines.push([
+      rows.push([
         emp.name,
         s.annualGross, s.annualSocial,
         s.calc.salDed, s.calc.income,
@@ -145,14 +190,9 @@ export function YearEndTab() {
         s.calc.taxable, s.calc.baseTax, s.calc.reconstructionTax,
         s.calc.totalTax, s.annualWithheld,
         s.diff,
-      ].join(','));
+      ]);
     }
-    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `year_end_${year}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    downloadTextFile(toCsv(rows), `year_end_${year}.csv`);
   }
 
   return html`
@@ -172,9 +212,10 @@ export function YearEndTab() {
       </div>
 
       <div class="note note-info">
-        ${year}年の月次給与＋賞与を集計し、年間所得税を再計算します。<br/>
+        ${year}年の月次給与＋賞与を集計し、年間所得税を再計算します（非課税通勤手当は年収から除外）。<br/>
         源泉徴収済額との差額が「還付（−）」または「追徴（＋）」となり、通常 <strong>12月の給与</strong> で精算します。<br/>
-        ※ 生命保険料控除・地震保険料控除・住宅ローン控除などは未対応。必要な場合は別途加味してください。
+        ※ 税制パラメータは対象年で自動切替（2025年分〜は令和7年度改正: 給与所得控除最低65万円・基礎控除95万〜58万円）。<br/>
+        ※ 生命保険料控除・地震保険料控除・住宅ローン控除・特定親族特別控除などは未対応。必要な場合は別途加味してください。
       </div>
 
       ${empList.length === 0 ? html`
@@ -185,7 +226,7 @@ export function YearEndTab() {
             <thead>
               <tr style=${{ background: 'var(--bg-alt)' }}>
                 <th style=${th}>従業員</th>
-                <th style=${{ ...th, textAlign: 'right' }}>年間総支給</th>
+                <th style=${{ ...th, textAlign: 'right' }}>年間収入（課税）</th>
                 <th style=${{ ...th, textAlign: 'right' }}>社保計</th>
                 <th style=${{ ...th, textAlign: 'right' }}>給与所得</th>
                 <th style=${{ ...th, textAlign: 'right' }}>課税所得</th>
@@ -272,7 +313,7 @@ function DetailCards({ empList, summary }) {
                 }}>
                   <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20, fontSize: 12 }}>
                     <div>
-                      <${Kv} label="年間総支給額" value=${s.annualGross} />
+                      <${Kv} label="年間収入（課税支給）" value=${s.annualGross} />
                       <${Kv} label="給与所得控除" value=${-s.calc.salDed} />
                       <${Kv} label="給与所得金額" value=${s.calc.income} strong />
                     </div>

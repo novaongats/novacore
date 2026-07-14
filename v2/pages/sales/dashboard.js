@@ -55,6 +55,7 @@ export function DashboardTab() {
     [cats.data, entries.data, costs.data, months.join(',')]);
 
   const loading = cats.loading || entries.loading || costs.loading;
+  const loadError = cats.error || entries.error || costs.error;
 
   // Per-month aggregates
   const perMonth = useMemo(() => summarizeByMonth(grid, months), [grid, months]);
@@ -66,6 +67,12 @@ export function DashboardTab() {
   return html`
     <div>
       <${MonthBar} month=${month} onChange=${setMonth} />
+
+      ${loadError && html`
+        <div class="note note-err" style=${{ marginBottom: 16 }}>
+          データの読込に失敗しました: <code>${loadError.code || loadError.message || String(loadError)}</code>
+        </div>
+      `}
 
       <${KpiRow} current=${currentMonth} prev=${prevMonth} />
 
@@ -91,35 +98,63 @@ export function DashboardTab() {
 // ---- Aggregation helpers ---------------------------------------------------
 
 /**
- * Build lookup: key "YYYY-MM|catId" → { month, cat, revenue, manualCost, revShareCost }
+ * Build lookup: key "YYYY-MM|catId" → { month, cat, revenue, manualCost, revShareCost, legacyExpense }
+ *
+ * - catId がカテゴリマスタに無い / catId が無い（dept のみの v1 移行レコード）場合も
+ *   疑似カテゴリ行として集計に含める（無言で捨てない → KPI 合計がホーム・売上タブと一致）。
+ * - type:'expense'（v1 手入力経費）は売上ではなくコスト（legacyExpense）に計上する。
  */
 function buildGrid(cats, entries, costs, months) {
   const monthSet = new Set(months);
   const grid = new Map();
+  const catMap = new Map(cats.map(c => [c.id, c]));
+  const pseudoCats = new Map();
 
-  // Seed cells for each (month, cat) so empty rows are addressable.
-  for (const m of months) {
-    for (const c of cats) {
-      grid.set(m + '|' + c.id, {
-        month: m, cat: c,
-        revenue: 0, manualCost: 0, revShareCost: 0,
-      });
+  // マスタに無い catId / catId 無しレコード用の疑似カテゴリ
+  function pseudoCat(catId, dept) {
+    const id = catId ? '__missing_' + catId : '__nocat_' + (dept || 'other');
+    let c = pseudoCats.get(id);
+    if (!c) {
+      c = {
+        id,
+        name: catId ? `（削除済みカテゴリ: ${catId}）` : '（カテゴリ不明）',
+        dept: dept || 'other',
+        pseudo: true,
+      };
+      pseudoCats.set(id, c);
     }
+    return c;
   }
 
-  // Revenue from salesEntries
+  function cell(m, cat) {
+    const key = m + '|' + cat.id;
+    let row = grid.get(key);
+    if (!row) {
+      row = { month: m, cat, revenue: 0, manualCost: 0, revShareCost: 0, legacyExpense: 0 };
+      grid.set(key, row);
+    }
+    return row;
+  }
+
+  // Seed cells for each (month, cat) so empty rows are addressable.
+  for (const m of months) for (const c of cats) cell(m, c);
+
+  // Revenue / legacy expense from salesEntries
   for (const e of entries) {
     const m = (e.date || '').substring(0, 7);
     if (!monthSet.has(m)) continue;
-    const row = grid.get(m + '|' + e.catId);
-    if (row) row.revenue += Number(e.amount || 0);
+    const cat = catMap.get(e.catId) || pseudoCat(e.catId, e.dept);
+    const row = cell(m, cat);
+    if (e.type === 'expense') row.legacyExpense += Number(e.amount || 0);
+    else row.revenue += Number(e.amount || 0);
   }
 
-  // Manual costs from salesCosts
+  // Manual costs from salesCosts（削除済みカテゴリのコスト表も含める）
   for (const c of costs) {
     if (!monthSet.has(c.yearMonth)) continue;
-    const row = grid.get(c.yearMonth + '|' + c.catId);
-    if (row) row.manualCost += sumBy(asArray(c.items), i => i.amount);
+    const cat = catMap.get(c.catId) || pseudoCat(c.catId, null);
+    const row = cell(c.yearMonth, cat);
+    row.manualCost += sumBy(asArray(c.items), i => i.amount);
   }
 
   // Rev-share cost (computed)
@@ -134,12 +169,16 @@ function buildGrid(cats, entries, costs, months) {
   return grid;
 }
 
+function rowCost(row) {
+  return row.manualCost + row.revShareCost + (row.legacyExpense || 0);
+}
+
 function summarizeByMonth(grid, months) {
   const out = {};
   for (const m of months) out[m] = { revenue: 0, cost: 0 };
   for (const row of grid.values()) {
     out[row.month].revenue += row.revenue;
-    out[row.month].cost += row.manualCost + row.revShareCost;
+    out[row.month].cost += rowCost(row);
   }
   return out;
 }
@@ -151,7 +190,7 @@ function summarizeByDept(grid, month) {
     const dept = row.cat.dept || 'other';
     if (!out[dept]) out[dept] = { revenue: 0, cost: 0 };
     out[dept].revenue += row.revenue;
-    out[dept].cost += row.manualCost + row.revShareCost;
+    out[dept].cost += rowCost(row);
   }
   return out;
 }
@@ -160,7 +199,7 @@ function summarizeByCategory(grid, month) {
   const out = [];
   for (const row of grid.values()) {
     if (row.month !== month) continue;
-    const cost = row.manualCost + row.revShareCost;
+    const cost = rowCost(row);
     const profit = row.revenue - cost;
     if (row.revenue === 0 && cost === 0) continue;
     out.push({ cat: row.cat, revenue: row.revenue, cost, profit });
@@ -195,9 +234,10 @@ function KpiRow({ current, prev }) {
     <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
       <${KpiCard} label="当月売上"  value=${formatYen(current.revenue)}
                  accent="primary" />
-      <${KpiCard} label="当月コスト" value=${formatYen(current.cost)}
-                 accent=${current.cost > 0 ? 'danger' : null} />
-      <${KpiCard} label="営業利益"
+      <${KpiCard} label="部門コスト（月次コスト表）" value=${formatYen(current.cost)}
+                 accent=${current.cost > 0 ? 'danger' : null}
+                 sub="現金出納帳の経費はホーム/税理士書類で集計" />
+      <${KpiCard} label="部門利益"
                  value=${formatYen(profit)}
                  accent=${profit >= 0 ? 'success' : 'danger'}
                  sub=${current.revenue > 0 ? `利益率 ${formatPct(profitRate)}` : null} />
@@ -239,8 +279,13 @@ function KpiCard({ label, value, sub, accent }) {
 function DeptBars({ grid, month, cats }) {
   const depts = useDepts();
   const byDept = summarizeByDept(grid, month);
+  const knownKeys = new Set(depts.map(d => d.key));
   const rows = depts
     .map(d => ({ ...d, ...byDept[d.key] }))
+    // 部門マスタに無い dept キー（例: honbu）も「その他（未登録部門）」として表示
+    .concat(Object.keys(byDept)
+      .filter(k => !knownKeys.has(k))
+      .map(k => ({ key: k, label: `その他（未登録部門: ${k}）`, color: '#94a3b8', ...byDept[k] })))
     .filter(r => r.revenue > 0 || r.cost > 0);
 
   if (rows.length === 0) {
@@ -393,7 +438,7 @@ function TrendTable({ perMonth, months, month }) {
                        color="var(--primary)" />
             <${TrendRow} label="コスト" values=${months.map(m => perMonth[m]?.cost || 0)}
                        color="var(--danger)" />
-            <${TrendRow} label="営業利益" bold
+            <${TrendRow} label="部門利益" bold
                        values=${months.map(m => {
                          const p = perMonth[m] || { revenue: 0, cost: 0 };
                          return p.revenue - p.cost;

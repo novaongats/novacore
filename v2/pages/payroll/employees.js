@@ -5,7 +5,7 @@
 import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
-import { repos, useCollection } from '../../store.js';
+import { repos, useCollection, where, limit } from '../../store.js';
 import { formatYen, uid, asArray } from '../../shared.js';
 import { EMP_TYPES, EMP_TYPE_MAP, PREFECTURES } from './constants.js';
 import { getHealthStandard, findGrade } from './calc.js';
@@ -29,6 +29,7 @@ const EMPTY = {
   stdRemuneration: '',      // 手動上書き可能（0=自動計算）
   commuteAllowanceMonthly: '',   // 通勤手当（月額）
   commuteIsPublicTransport: true,
+  commuteDistanceKm: '',    // 片道通勤距離(km) — マイカー等の非課税限度額の段階判定用
   onMaternityLeave: false,  // 産休（社保免除）
   onChildcareLeave: false,  // 育休（社保免除）
   archived: false,          // 退職済み（過去データ保護のため削除ではなくアーカイブ）
@@ -175,6 +176,8 @@ function EmployeeModal({ initial, onClose }) {
         stdRemuneration: Number(form.stdRemuneration) || 0,  // 0 = auto
         commuteAllowanceMonthly: Number(form.commuteAllowanceMonthly) || 0,
         commuteIsPublicTransport: form.commuteIsPublicTransport !== false,
+        commuteDistanceKm: Number(form.commuteDistanceKm) || 0,  // 0 = 未入力
+
         onMaternityLeave: !!form.onMaternityLeave,
         onChildcareLeave: !!form.onChildcareLeave,
         archived: !!form.archived,
@@ -189,9 +192,24 @@ function EmployeeModal({ initial, onClose }) {
   }
 
   async function remove() {
-    if (!confirm(`「${initial.name}」を削除しますか？\n過去の給与履歴は残ります。`)) return;
+    setErr(null);
     setBusy(true);
     try {
+      // 物理削除ガード: 給与記録（月次/賞与）がある従業員は削除不可（アーカイブを案内）
+      const [recs, bons] = await Promise.all([
+        repos.payrollRecords.list(where('empId', '==', initial.id), limit(1)),
+        repos.payrollBonus.list(where('empId', '==', initial.id), limit(1)),
+      ]);
+      if (recs.length > 0 || bons.length > 0) {
+        alert(`「${initial.name}」には給与記録（月次給与または賞与）が存在するため削除できません。\n` +
+              '過去データ保護のため、「退職済み」にチェックを入れてアーカイブしてください。');
+        setBusy(false);
+        return;
+      }
+      if (!confirm(`「${initial.name}」を削除しますか？`)) {
+        setBusy(false);
+        return;
+      }
       await repos.payrollEmployees.remove(initial.id);
       onClose();
     } catch (e) {
@@ -330,6 +348,18 @@ function EmployeeModal({ initial, onClose }) {
                      onChange=${e => set('commuteIsPublicTransport', e.target.checked)} disabled=${busy} />
               公共交通機関を利用（オフ=マイカー等）
             </label>
+            ${form.commuteIsPublicTransport === false && html`
+              <div class="field">
+                <label>片道通勤距離 (km)</label>
+                <input type="number" min="0" value=${form.commuteDistanceKm}
+                       onInput=${e => set('commuteDistanceKm', e.target.value)} disabled=${busy}
+                       style=${{ textAlign: 'right', fontFamily: 'var(--font-num)' }}
+                       placeholder="例: 12" />
+                <div style=${{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
+                  マイカー等の非課税限度額を距離段階で判定します（未入力は上限31,600円で計算）
+                </div>
+              </div>
+            `}
           </div>
 
           <div style=${{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>

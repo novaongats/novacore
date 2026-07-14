@@ -11,8 +11,22 @@ import {
   dayjs, formatYen, today, thisMonth, monthLabel, shortDateLabel,
   addMonths, uid, sumBy, groupBy, asArray,
 } from '../../shared.js';
+import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
+
+// インボイス登録番号の形式（T + 13桁）。警告表示のみで保存はブロックしない。
+const INVOICE_NUMBER_RE = /^T\d{13}$/;
+
+function InvoiceNumberWarn({ value }) {
+  const v = (value || '').trim();
+  if (!v || INVOICE_NUMBER_RE.test(v)) return null;
+  return html`
+    <div style=${{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+      ⚠ 登録番号が T+13桁 の形式と一致しません（例: T1234567890123）。このまま保存はできます。
+    </div>
+  `;
+}
 
 // ---- Main tab --------------------------------------------------------------
 
@@ -35,6 +49,7 @@ export function LedgerTab() {
 
   const accounts = useCollection(repos.cashbookAccounts);
   const depts    = useCollection(repos.cashbookDepts);
+  const bizDepts = useDepts(); // salesDepts（税理士書類の部門別集計用）
 
   const sortedAccounts = useMemo(
     () => [...asArray(accounts.data)].sort((a, b) => (a.order ?? 999) - (b.order ?? 999)),
@@ -50,7 +65,13 @@ export function LedgerTab() {
       <${MonthBar} month=${month} onChange=${setMonth} />
       <${KpiRow} entries=${entries.data} />
 
-      ${accounts.data.length === 0 && html`
+      ${(accounts.error || depts.error) && html`
+        <div class="note note-err" style=${{ marginBottom: 16 }}>
+          マスタの読込に失敗しました（権限またはネットワーク）:
+          ${(accounts.error || depts.error).message || String(accounts.error || depts.error)}
+        </div>
+      `}
+      ${!accounts.error && !accounts.loading && accounts.data.length === 0 && html`
         <div class="note note-warn" style=${{ marginBottom: 16 }}>
           勘定科目が未登録です。「マスタ」タブで科目を登録してください。
         </div>
@@ -59,6 +80,7 @@ export function LedgerTab() {
       <${QuickAdd}
         accounts=${sortedAccounts}
         depts=${sortedDepts}
+        bizDepts=${bizDepts}
         disabled=${accounts.data.length === 0}
       />
 
@@ -74,6 +96,7 @@ export function LedgerTab() {
           initial=${editing}
           accounts=${sortedAccounts}
           depts=${sortedDepts}
+          bizDepts=${bizDepts}
           onClose=${() => setEditing(null)}
         />
       `}
@@ -143,11 +166,12 @@ function KpiCard({ label, value, sub, accent }) {
 
 // ---- Quick add form --------------------------------------------------------
 
-function QuickAdd({ accounts, depts, disabled }) {
+function QuickAdd({ accounts, depts, bizDepts, disabled }) {
   const [date, setDate] = useState(today());
   const [vendor, setVendor] = useState('');
   const [account, setAccount] = useState('');
   const [dept, setDept] = useState('');
+  const [deptKey, setDeptKey] = useState('');
   const [amount, setAmount] = useState('');
   const [reducedTax, setReducedTax] = useState(false);
   const [hasInvoice, setHasInvoice] = useState(false);
@@ -182,6 +206,7 @@ function QuickAdd({ accounts, depts, disabled }) {
         vendor: vendor.trim(),
         category: account,
         dept,
+        deptKey, // salesDepts のキー（税理士書類の部門別集計用・任意）
         amount: Math.round(amtNum),
         reducedTax,
         hasInvoice,
@@ -241,7 +266,7 @@ function QuickAdd({ accounts, depts, disabled }) {
 
       <div style=${{
         display: 'grid',
-        gridTemplateColumns: '180px 1fr auto auto auto',
+        gridTemplateColumns: '150px 170px 1fr auto auto auto',
         gap: 10, alignItems: 'center',
       }}>
         <select value=${dept} onChange=${e => setDept(e.target.value)}
@@ -249,6 +274,14 @@ function QuickAdd({ accounts, depts, disabled }) {
           <option value="">-- 部門（任意）--</option>
           ${depts.map(d => html`
             <option key=${d.id} value=${d.name}>${d.name}</option>
+          `)}
+        </select>
+        <select value=${deptKey} onChange=${e => setDeptKey(e.target.value)}
+                disabled=${busy || disabled} style=${inputStyle}
+                title="部門（税理士書類の部門別集計用）">
+          <option value="">-- 事業部門（税理士集計用・任意）--</option>
+          ${bizDepts.filter(d => !d.archived || d.key === deptKey).map(d => html`
+            <option key=${d.key} value=${d.key}>${d.label}${d.archived ? '（アーカイブ済）' : ''}</option>
           `)}
         </select>
         <input type="text" placeholder="メモ（任意）" value=${memo}
@@ -276,6 +309,7 @@ function QuickAdd({ accounts, depts, disabled }) {
                  value=${invoiceNumber}
                  onInput=${e => setInvoiceNumber(e.target.value)} disabled=${busy || disabled}
                  style=${{ ...inputStyle, width: 300, fontFamily: 'var(--font-mono)' }} />
+          <${InvoiceNumberWarn} value=${invoiceNumber} />
         </div>
       `}
     </form>
@@ -359,12 +393,13 @@ function EntryRow({ entry, onEdit }) {
 
 // ---- Edit modal ------------------------------------------------------------
 
-function EntryModal({ initial, accounts, depts, onClose }) {
+function EntryModal({ initial, accounts, depts, bizDepts, onClose }) {
   const [form, setForm] = useState(() => ({
     date: initial.date || today(),
     vendor: initial.vendor || '',
     category: initial.category || '',
     dept: initial.dept || '',
+    deptKey: initial.deptKey || '',
     amount: String(initial.amount ?? ''),
     reducedTax: !!initial.reducedTax,
     hasInvoice: !!initial.hasInvoice,
@@ -390,6 +425,7 @@ function EntryModal({ initial, accounts, depts, onClose }) {
         vendor: form.vendor.trim(),
         category: form.category,
         dept: form.dept,
+        deptKey: form.deptKey || '',
         amount: Math.round(amtNum),
         reducedTax: form.reducedTax,
         hasInvoice: form.hasInvoice,
@@ -467,6 +503,16 @@ function EntryModal({ initial, accounts, depts, onClose }) {
               </select>
             </div>
           </div>
+          <div class="field">
+            <label>事業部門（税理士書類の部門別集計用・任意）</label>
+            <select value=${form.deptKey} onChange=${e => set('deptKey', e.target.value)}
+                    disabled=${busy} style=${inputStyle}>
+              <option value="">-- 未選択 --</option>
+              ${bizDepts.filter(d => !d.archived || d.key === form.deptKey).map(d => html`
+                <option key=${d.key} value=${d.key}>${d.label}${d.archived ? '（アーカイブ済）' : ''}</option>
+              `)}
+            </select>
+          </div>
           <div style=${{ display: 'flex', gap: 20 }}>
             <label style=${checkLabel}>
               <input type="checkbox" checked=${form.reducedTax}
@@ -485,6 +531,7 @@ function EntryModal({ initial, accounts, depts, onClose }) {
               <input type="text" value=${form.invoiceNumber}
                      onInput=${e => set('invoiceNumber', e.target.value)} disabled=${busy}
                      placeholder="T0000000000000" style=${{ fontFamily: 'var(--font-mono)' }} />
+              <${InvoiceNumberWarn} value=${form.invoiceNumber} />
             </div>
           `}
           <div class="field">

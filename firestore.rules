@@ -76,6 +76,8 @@ service cloud.firestore {
     match /invoices/{doc}         { allow read, write: if isAuthed(); }
     match /invoiceClients/{doc}   { allow read, write: if isAuthed(); }
     match /invoiceBanks/{doc}     { allow read, write: if isAuthed(); }
+    // 採番カウンター（invoices の書類番号トランザクション用）
+    match /counters/{doc}         { allow read, write: if isAuthed(); }
     match /documents/{doc}        { allow read, write: if isAuthed(); }
 
     // 上記に列挙のないコレクションはすべて拒否（デフォルト）

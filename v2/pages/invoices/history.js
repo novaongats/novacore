@@ -113,7 +113,7 @@ export function HistoryTab({ onEdit, onNew }) {
 
 function Row({ doc, onEdit, onPreview }) {
   const typeInfo = DOC_TYPE_MAP[doc.type] || DOC_TYPES[0];
-  const statusInfo = STATUS_MAP[doc.status || 'draft'];
+  const statusInfo = STATUS_MAP[doc.status || 'draft'] || STATUS_MAP.draft;
   return html`
     <div style=${tableRow} onClick=${onEdit}>
       <div>

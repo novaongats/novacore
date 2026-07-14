@@ -1,6 +1,8 @@
 /* ============================================================
    NOVA Core v2 — Payroll / Annual income management
-   Detect 103/106/130/150/201万の壁 and project year-end income.
+   Detect 年収の壁 (年度対応: 〜2024=103万等 / 2025〜=123万・160万等)
+   and project year-end income.
+   壁判定の年収は非課税通勤手当を除いた課税支給ベース。
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -8,7 +10,7 @@ import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
 import { formatYen, asArray } from '../../shared.js';
-import { EMP_TYPE_MAP, INCOME_WALLS } from './constants.js';
+import { EMP_TYPE_MAP, getIncomeWalls } from './constants.js';
 
 const html = htm.bind(h);
 
@@ -35,6 +37,7 @@ export function AnnualTab() {
   );
 
   const empList = asArray(employees.data);
+  const walls = getIncomeWalls(year);
 
   // Aggregate per-employee
   const summary = useMemo(() => {
@@ -43,6 +46,7 @@ export function AnnualTab() {
       m.set(e.id, {
         emp: e,
         monthsWithRecord: 0,
+        lastMonthNum: 0,
         monthlyGross: 0,
         monthlyIncomeTax: 0,
         monthlySocial: 0,
@@ -57,10 +61,13 @@ export function AnnualTab() {
       const row = m.get(r.empId);
       if (!row) continue;
       row.monthsWithRecord += 1;
-      row.monthlyGross     += Number(r.gross) || 0;
+      // 壁判定の年収は非課税通勤手当を除いた課税支給ベース
+      row.monthlyGross     += Math.max(0, (Number(r.gross) || 0) - (Number(r.commuteNonTaxable) || 0));
       row.monthlyIncomeTax += Number(r.incomeTax) || 0;
       row.monthlySocial    += Number(r.social) || 0;
       row.monthlyNet       += Number(r.net) || 0;
+      const mNum = Number((r.month || '').slice(5, 7)) || 0;
+      if (mNum > row.lastMonthNum) row.lastMonthNum = mNum;
     }
     for (const b of asArray(bonuses.data)) {
       const row = m.get(b.empId);
@@ -70,18 +77,19 @@ export function AnnualTab() {
       row.bonusSocial    += Number(b.social) || 0;
       row.bonusNet       += Number(b.net) || 0;
     }
-    // Projected annual based on monthly trend
-    const currentMonth = year === thisYear ? new Date().getMonth() + 1 : 12;
     for (const row of m.values()) {
       row.actualGross = row.monthlyGross + row.bonusGross;
       row.actualNet   = row.monthlyNet + row.bonusNet;
-      const monthsDone = Math.max(1, row.monthsWithRecord);
-      const avgMonthly = row.monthlyGross / monthsDone;
-      // Project: remaining months × avg + accumulated bonus
-      row.projectedGross = row.actualGross + Math.max(0, 12 - monthsDone) * avgMonthly;
+      // 見込み = 記録がある最終月までの実績 + 残月 × 直近平均
+      if (row.monthsWithRecord === 0) {
+        row.projectedGross = row.actualGross;
+      } else {
+        const avgMonthly = row.monthlyGross / row.monthsWithRecord;
+        row.projectedGross = row.actualGross + Math.max(0, 12 - row.lastMonthNum) * avgMonthly;
+      }
     }
     return m;
-  }, [empList, records.data, bonuses.data, year, thisYear]);
+  }, [empList, records.data, bonuses.data]);
 
   return html`
     <div>
@@ -100,7 +108,7 @@ export function AnnualTab() {
         </div>
       </div>
 
-      <${WallsLegend} />
+      <${WallsLegend} walls=${walls} year=${year} />
 
       ${empList.length === 0 ? html`
         <div class="note note-warn">
@@ -112,7 +120,7 @@ export function AnnualTab() {
             <thead>
               <tr style=${{ background: 'var(--bg-alt)' }}>
                 <th style=${th}>従業員</th>
-                <th style=${{ ...th, textAlign: 'right' }}>月次累計</th>
+                <th style=${{ ...th, textAlign: 'right' }}>月次累計（課税）</th>
                 <th style=${{ ...th, textAlign: 'right' }}>賞与累計</th>
                 <th style=${{ ...th, textAlign: 'right' }}>実績合計</th>
                 <th style=${{ ...th, textAlign: 'right' }}>年末見込</th>
@@ -121,7 +129,7 @@ export function AnnualTab() {
             </thead>
             <tbody>
               ${empList.map(e => html`
-                <${SummaryRow} key=${e.id} emp=${e} sum=${summary.get(e.id)} />
+                <${SummaryRow} key=${e.id} emp=${e} sum=${summary.get(e.id)} walls=${walls} />
               `)}
             </tbody>
           </table>
@@ -131,12 +139,14 @@ export function AnnualTab() {
   `;
 }
 
-function WallsLegend() {
+function WallsLegend({ walls, year }) {
   return html`
     <div class="card" style=${{ padding: 14, marginBottom: 14 }}>
-      <div style=${{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>📏 年収の壁</div>
+      <div style=${{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
+        📏 年収の壁（${year}年${Number(year) >= 2025 ? '・令和7年度税制改正反映' : '・旧制度'}）
+      </div>
       <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        ${INCOME_WALLS.map(w => html`
+        ${walls.map(w => html`
           <div key=${w.threshold} style=${{
             fontSize: 11, padding: '4px 10px', borderRadius: 999,
             background: 'var(--bg-alt)', color: 'var(--text-2)',
@@ -149,15 +159,15 @@ function WallsLegend() {
   `;
 }
 
-function SummaryRow({ emp, sum }) {
+function SummaryRow({ emp, sum, walls }) {
   if (!sum) return null;
   const type = EMP_TYPE_MAP[emp.type] || EMP_TYPE_MAP.regular;
   const projected = sum.projectedGross;
   const actual    = sum.actualGross;
 
   // Current wall status
-  const crossedWalls = INCOME_WALLS.filter(w => actual >= w.threshold);
-  const nextWall     = INCOME_WALLS.find(w => actual < w.threshold);
+  const crossedWalls = walls.filter(w => actual >= w.threshold);
+  const nextWall     = walls.find(w => actual < w.threshold);
   const approach = nextWall && (nextWall.threshold - projected <= 100000);
 
   return html`

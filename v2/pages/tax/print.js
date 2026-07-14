@@ -12,6 +12,7 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { useDoc, repos } from '../../store.js';
+import { PrintPortal } from '../../print.js';
 import { downloadCsv } from './data.js';
 
 const html = htm.bind(h);
@@ -29,6 +30,7 @@ export function TaxDocOverlay({ spec, onClose }) {
   }, [spec]);
 
   return html`
+    <${PrintPortal}>
     <div class="taxdoc-overlay">
       <div class="taxdoc-toolbar no-print">
         <div style=${{ color: '#fff', fontWeight: 600 }}>
@@ -39,7 +41,7 @@ export function TaxDocOverlay({ spec, onClose }) {
           <button class="btn" style=${{ background: '#10b981' }}
                   onClick=${() => window.print()}>🖨 印刷 / PDF保存</button>
           <button class="btn" style=${{ background: '#0ea5e9' }}
-                  onClick=${() => downloadCsv(spec, `${spec.id}_${spec.period}`)}>📥 CSV</button>
+                  onClick=${() => downloadCsv(spec, spec.filenameBase || spec.id)}>📥 CSV</button>
           <button class="btn btn-ghost" onClick=${onClose}
                   style=${{ background: 'rgba(255,255,255,.12)', color: '#fff', borderColor: 'transparent' }}>
             ✕ 閉じる
@@ -89,6 +91,7 @@ export function TaxDocOverlay({ spec, onClose }) {
 
       ${styleBlock}
     </div>
+    </${PrintPortal}>
   `;
 }
 
@@ -164,7 +167,7 @@ const styleBlock = html`
   .taxdoc-corp .name { font-size: 11pt; font-weight: 700; }
   .taxdoc-corp .meta { font-size: 8pt; color: #777; margin-top: 2pt; }
 
-  .taxdoc-section { margin-bottom: 12pt; break-inside: avoid; }
+  .taxdoc-section { margin-bottom: 12pt; }
   .taxdoc-h {
     font-size: 10.5pt; font-weight: 700; margin-bottom: 5pt;
     padding-left: 6pt; border-left: 3pt solid #333;
@@ -205,16 +208,18 @@ const styleBlock = html`
     font-size: 7.6pt; color: #666; line-height: 1.7;
   }
 
+  /* 印刷: PrintPortal が #app を display:none にするので、visibility ハックは不要。
+     @page（A4 縦/横）は applyPageOrientation() が <head> の style で一元管理する
+     （ここに書くと landscape 切替と競合するため書かない）。 */
   @media print {
-    @page { size: A4; margin: 0; }
-    .taxdoc-paper.landscape ~ style {}
     body { background: #fff !important; }
-    body * { visibility: hidden; }
-    .taxdoc-paper, .taxdoc-paper * { visibility: visible; }
     .taxdoc-overlay { position: static; background: #fff; }
-    .taxdoc-stage { padding: 0 !important; background: #fff !important; overflow: visible; }
-    .taxdoc-paper { box-shadow: none; }
+    .taxdoc-stage { padding: 0; background: #fff; overflow: visible; display: block; }
+    .taxdoc-paper { box-shadow: none; width: auto; min-height: 0; }
     .no-print { display: none !important; }
+    /* 複数ページ: 行単位で改ページし、各ページに見出し行を繰り返す */
+    .taxdoc-table tr { break-inside: avoid; }
+    .taxdoc-table thead { display: table-header-group; }
   }
 </style>
 `;

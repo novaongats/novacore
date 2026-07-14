@@ -70,19 +70,15 @@ export function UploadModal({ initial, onClose }) {
       let storagePath    = initial?.storagePath || '';
       let originalName   = initial?.originalFileName || '';
 
-      // Upload new file if selected
+      // 差し替えは「新アップロード → doc 更新成功 → 旧削除」の順。
+      // （先に旧を消すと、アップロードや保存の失敗でファイルが失われるため）
       if (newFile) {
-        // Delete old file first if replacing
-        if (initial?.storagePath) {
-          await deleteFile(initial.storagePath).catch(() => {});
-        }
         const uploaded = await uploadFile(newFile, 'nova_documents', form.dept, form.type);
         fileUrl        = uploaded.url;
         storagePath    = uploaded.storagePath;
         originalName   = uploaded.originalName;
       } else if (removedFile && initial?.storagePath) {
-        // User explicitly removed the file
-        await deleteFile(initial.storagePath).catch(() => {});
+        // ファイル明示削除: doc 更新成功後に Storage から消す
         fileUrl = storagePath = originalName = '';
       }
 
@@ -103,6 +99,15 @@ export function UploadModal({ initial, onClose }) {
       };
 
       await repos.documents.upsert(docData);
+
+      // doc 更新が成功してから旧ファイルを削除。
+      // 削除失敗は warn のみ（Storage に孤児が残るのは許容）。
+      const oldPath = initial?.storagePath;
+      if (oldPath && oldPath !== storagePath && (newFile || removedFile)) {
+        await deleteFile(oldPath).catch(e =>
+          console.warn('[documents] old file delete failed (orphan left):', oldPath, e));
+      }
+
       onClose();
     } catch (e) {
       console.error('[documents] save failed', e);

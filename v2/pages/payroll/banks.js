@@ -6,9 +6,54 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
-import { formatYen, thisMonth, monthLabel, addMonths, asArray } from '../../shared.js';
+import { formatYen, thisMonth, monthLabel, addMonths, asArray, toCsv, downloadTextFile } from '../../shared.js';
 
 const html = htm.bind(h);
+
+// ---- 全銀フォーマット向け 受取人カナ正規化 ----------------------------------
+// 全角カナ→半角カナ（濁点・半濁点は別文字）、ひらがな→カナ、小書き→並字、
+// 長音「ー」→「-」、中点→「.」、全角英数→半角、英字は大文字化。
+// 全銀で使えない文字はそのまま残す（銀行側で要確認）。
+
+const ZENGIN_MAP = {
+  'ア':'ｱ','イ':'ｲ','ウ':'ｳ','エ':'ｴ','オ':'ｵ',
+  'カ':'ｶ','キ':'ｷ','ク':'ｸ','ケ':'ｹ','コ':'ｺ',
+  'サ':'ｻ','シ':'ｼ','ス':'ｽ','セ':'ｾ','ソ':'ｿ',
+  'タ':'ﾀ','チ':'ﾁ','ツ':'ﾂ','テ':'ﾃ','ト':'ﾄ',
+  'ナ':'ﾅ','ニ':'ﾆ','ヌ':'ﾇ','ネ':'ﾈ','ノ':'ﾉ',
+  'ハ':'ﾊ','ヒ':'ﾋ','フ':'ﾌ','ヘ':'ﾍ','ホ':'ﾎ',
+  'マ':'ﾏ','ミ':'ﾐ','ム':'ﾑ','メ':'ﾒ','モ':'ﾓ',
+  'ヤ':'ﾔ','ユ':'ﾕ','ヨ':'ﾖ',
+  'ラ':'ﾗ','リ':'ﾘ','ル':'ﾙ','レ':'ﾚ','ロ':'ﾛ',
+  'ワ':'ﾜ','ヲ':'ｦ','ン':'ﾝ',
+  'ガ':'ｶﾞ','ギ':'ｷﾞ','グ':'ｸﾞ','ゲ':'ｹﾞ','ゴ':'ｺﾞ',
+  'ザ':'ｻﾞ','ジ':'ｼﾞ','ズ':'ｽﾞ','ゼ':'ｾﾞ','ゾ':'ｿﾞ',
+  'ダ':'ﾀﾞ','ヂ':'ﾁﾞ','ヅ':'ﾂﾞ','デ':'ﾃﾞ','ド':'ﾄﾞ',
+  'バ':'ﾊﾞ','ビ':'ﾋﾞ','ブ':'ﾌﾞ','ベ':'ﾍﾞ','ボ':'ﾎﾞ',
+  'パ':'ﾊﾟ','ピ':'ﾋﾟ','プ':'ﾌﾟ','ペ':'ﾍﾟ','ポ':'ﾎﾟ',
+  'ヴ':'ｳﾞ',
+  'ァ':'ｱ','ィ':'ｲ','ゥ':'ｳ','ェ':'ｴ','ォ':'ｵ',
+  'ッ':'ﾂ','ャ':'ﾔ','ュ':'ﾕ','ョ':'ﾖ','ヮ':'ﾜ','ヵ':'ｶ','ヶ':'ｹ',
+  'ー':'-','－':'-','‐':'-','―':'-','・':'.','。':'.','　':' ',
+  '（':'(','）':')','．':'.','／':'/',
+};
+
+const HALF_SMALL_KANA = {
+  'ｧ':'ｱ','ｨ':'ｲ','ｩ':'ｳ','ｪ':'ｴ','ｫ':'ｵ','ｬ':'ﾔ','ｭ':'ﾕ','ｮ':'ﾖ','ｯ':'ﾂ',
+};
+
+export function zenginKana(input) {
+  let s = String(input || '');
+  // ひらがな → カタカナ
+  s = s.replace(/[ぁ-ゖ]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+  // 全角英数 → 半角
+  s = s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+  // 半角カナの小書き（既に半角入力されたもの）→ 並字
+  s = s.replace(/[ｧｨｩｪｫｬｭｮｯ]/g, ch => HALF_SMALL_KANA[ch]);
+  // 全角カナ・記号 → 半角（マップ）
+  s = s.split('').map(ch => ZENGIN_MAP[ch] ?? ch).join('');
+  return s.toUpperCase().trim();
+}
 
 export function BanksTab() {
   const employees = useCollection(repos.payrollEmployees);
@@ -22,7 +67,7 @@ export function BanksTab() {
 
   return html`
     <div>
-      <${ExportSection} month=${exportMonth} onChangeMonth=${setExportMonth}
+      <${ExportSection} key=${exportMonth} month=${exportMonth} onChangeMonth=${setExportMonth}
                       employees=${empList} acctMap=${acctMap} />
 
       <div class="card" style=${{ padding: 20 }}>
@@ -83,12 +128,22 @@ export function BanksTab() {
 // ---- Export section --------------------------------------------------------
 
 function ExportSection({ month, onChangeMonth, employees, acctMap }) {
+  // 対象種別: 月次給与 or 賞与（親から key=month が付くため月切替でリセットされる）
+  const [payKind, setPayKind] = useState('monthly');
+  const [transferDate, setTransferDate] = useState(month + '-25');  // 既定は25日
+
   const records = useCollection(
     repos.payrollRecords,
     () => [where('month', '==', month)],
     [month],
   );
-  const recMap = new Map(asArray(records.data).map(r => [r.empId, r]));
+  const bonuses = useCollection(
+    repos.payrollBonus,
+    () => [where('month', '==', month)],
+    [month],
+  );
+  const source = payKind === 'bonus' ? bonuses : records;
+  const recMap = new Map(asArray(source.data).map(r => [r.empId, r]));
 
   const pairs = employees
     .map(emp => ({
@@ -113,39 +168,45 @@ function ExportSection({ month, onChangeMonth, employees, acctMap }) {
 
     // 簡易 CSV フォーマット (全銀協フォーマットは固定長テキストだが、実用的なCSV出力として)
     // 参考: 日付 / 銀行名 / 支店名 / 支店コード / 口座種別(1:普通 2:当座) / 口座番号 / 名義カナ / 金額
-    const header = ['振込日', '銀行名', '支店名', '支店コード', '種別', '口座番号', '名義（カナ）', '金額'];
-    const lines = [header.join(',')];
+    const rows = [['振込日', '銀行名', '支店名', '支店コード', '種別', '口座番号', '名義（カナ）', '金額']];
     for (const { acct, rec } of eligible) {
-      lines.push([
-        month + '-25',  // 25日振込と仮定、実運用では可変に
+      rows.push([
+        transferDate || (month + '-25'),
         acct.bankName || '',
         acct.branchName || '',
         acct.branchCode || '',
         acct.accountType === '当座' ? '2' : '1',
         (acct.accountNumber || '').padStart(7, '0'),
-        (acct.accountHolderKana || acct.accountHolder || '').replace(/,/g, ''),
+        zenginKana(acct.accountHolderKana || acct.accountHolder || ''),
         rec.net || 0,
-      ].join(','));
+      ]);
     }
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `salary_transfer_${month}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    const prefix = payKind === 'bonus' ? 'bonus_transfer' : 'salary_transfer';
+    downloadTextFile(toCsv(rows), `${prefix}_${month}.csv`);
   }
 
   return html`
     <div class="card" style=${{ padding: 20, marginBottom: 18 }}>
       <div style=${{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>📥 振込データ出力</div>
 
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <button class="btn btn-ghost" onClick=${() => onChangeMonth(addMonths(month, -1))}>◀</button>
         <div style=${{ fontSize: 15, fontWeight: 700, minWidth: 100, textAlign: 'center' }}>
           ${monthLabel(month)}
         </div>
         <button class="btn btn-ghost" onClick=${() => onChangeMonth(addMonths(month, 1))}>▶</button>
+
+        <select value=${payKind} onChange=${e => setPayKind(e.target.value)} style=${selectCompact}>
+          <option value="monthly">月次給与</option>
+          <option value="bonus">賞与</option>
+        </select>
+
+        <label style=${{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                         color: 'var(--text-3)', fontWeight: 600 }}>
+          振込日
+          <input type="date" value=${transferDate}
+                 onInput=${e => setTransferDate(e.target.value)} style=${selectCompact} />
+        </label>
       </div>
 
       <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
@@ -326,6 +387,10 @@ const statLabel = {
   textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4,
 };
 const statValue = { fontSize: 16, fontWeight: 700 };
+const selectCompact = {
+  padding: '8px 10px', border: '1px solid var(--border)',
+  borderRadius: 8, background: 'var(--surface)', fontSize: 12,
+};
 const selectStyle = {
   width: '100%', padding: '10px 12px',
   border: '1px solid var(--border)', borderRadius: 8,

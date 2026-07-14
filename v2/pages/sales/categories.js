@@ -18,17 +18,21 @@ const html = htm.bind(h);
 export function CategoriesTab() {
   const { data: cats, loading, error } = useCollection(repos.salesCategories);
   const [editing, setEditing] = useState(null); // null | {new}-object | existing doc
+  const depts = useDepts();
 
   if (loading) return html`<div style=${{ color: 'var(--text-3)' }}>読込中...</div>`;
   if (error) return html`
     <div class="note note-err">読込エラー: ${error.message || String(error)}</div>
   `;
 
+  // 部門グループは depts マスタの order 順。マスタに無い dept は末尾。
+  const deptOrder = new Map(depts.map((d, i) => [d.key, i]));
+  const orderOf = (k) => deptOrder.has(k) ? deptOrder.get(k) : 999;
   const sorted = [...cats].sort((a, b) => {
-    // Sort by dept then name
-    const da = a.dept || 'zzz';
-    const db = b.dept || 'zzz';
-    if (da !== db) return da.localeCompare(db);
+    const da = a.dept || 'other';
+    const db = b.dept || 'other';
+    if (orderOf(da) !== orderOf(db)) return orderOf(da) - orderOf(db);
+    if (da !== db) return da.localeCompare(db); // どちらも未登録部門のとき
     return (a.name || '').localeCompare(b.name || '', 'ja');
   });
 

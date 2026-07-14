@@ -8,7 +8,7 @@ import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
-import { formatYen, asArray } from '../../shared.js';
+import { formatYen, asArray, toCsv, downloadTextFile } from '../../shared.js';
 import { getHealthStandard, findGrade } from './calc.js';
 import { EMP_TYPE_MAP } from './constants.js';
 
@@ -75,25 +75,19 @@ export function AssessmentTab() {
   }
 
   function exportCsv() {
-    const header = ['氏名', '4月', '5月', '6月', '平均', '現標準報酬', '現等級', '新標準報酬', '新等級', '等級変動'];
-    const lines = [header.join(',')];
+    const rows = [['氏名', '4月', '5月', '6月', '平均', '現標準報酬', '現等級', '新標準報酬', '新等級', '等級変動']];
     for (const emp of empList) {
       const r = rowFor(emp);
-      lines.push([
+      rows.push([
         emp.name,
         r.m4?.gross || 0, r.m5?.gross || 0, r.m6?.gross || 0,
         r.avg || 0,
         r.curStd, findGrade(r.curStd) || '-',
         r.newStd || '-', r.newStd ? (findGrade(r.newStd) || '-') : '-',
-        r.gradeChange > 0 ? '+' + r.gradeChange : r.gradeChange,
-      ].join(','));
+        r.gradeChange > 0 ? '+' + r.gradeChange : String(r.gradeChange),
+      ]);
     }
-    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `assessment_${year}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    downloadTextFile(toCsv(rows), `assessment_${year}.csv`);
   }
 
   return html`

@@ -1,13 +1,22 @@
 /* ============================================================
    NOVA Core v2 — Invoices / A4 Preview & print
    Renders a full A4 layout suitable for printing to PDF.
-   Print CSS ensures only the preview is rendered on paper.
+
+   印刷: PrintPortal（v2/print.js）で overlay を body 直下に描画し、
+   印刷時は #app を display:none で丸ごと消す（styles.css の
+   body.has-print-overlay ルールと対）。visibility ハックは不要になり、
+   通常フローで複数ページの改ページが正しく機能する。
+
+   適格請求書: 税額サマリーは税率ごとに区分した対価の額・適用税率・
+   税率ごとの消費税額を表示（calcTotals の byRate）。請求書型では
+   hideTaxBreakdown に関わらず必ず表示する（法定記載事項）。
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { formatYen } from '../../shared.js';
 import { calcTotals, DOC_TYPE_MAP } from './calc.js';
+import { PrintPortal } from '../../print.js';
 
 const html = htm.bind(h);
 
@@ -37,32 +46,34 @@ export function PreviewOverlay({ doc, onClose }) {
   }
 
   return html`
-    <div class="preview-overlay">
-      <div class="preview-toolbar no-print">
-        <div style=${{ color: '#fff', fontWeight: 600 }}>
-          ${TITLE_MAP[doc.type] || '書類'} プレビュー
-          <span style=${{ marginLeft: 10, fontSize: 12, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>
-            ${doc.docNumber || ''}
-          </span>
+    <${PrintPortal}>
+      <div class="preview-overlay">
+        <div class="preview-toolbar no-print">
+          <div style=${{ color: '#fff', fontWeight: 600 }}>
+            ${TITLE_MAP[doc.type] || '書類'} プレビュー
+            <span style=${{ marginLeft: 10, fontSize: 12, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>
+              ${doc.docNumber || '（保存時に採番）'}
+            </span>
+          </div>
+          <div style=${{ display: 'flex', gap: 8 }}>
+            <button class="btn" onClick=${handlePrint}
+                    style=${{ background: '#10b981', boxShadow: '0 1px 3px rgba(16,185,129,0.25)' }}>
+              🖨 印刷 / PDF保存
+            </button>
+            <button class="btn btn-ghost" onClick=${onClose}
+                    style=${{ background: 'rgba(255,255,255,0.12)', color: '#fff', borderColor: 'transparent' }}>
+              ✕ 閉じる
+            </button>
+          </div>
         </div>
-        <div style=${{ display: 'flex', gap: 8 }}>
-          <button class="btn" onClick=${handlePrint}
-                  style=${{ background: '#10b981', boxShadow: '0 1px 3px rgba(16,185,129,0.25)' }}>
-            🖨 印刷 / PDF保存
-          </button>
-          <button class="btn btn-ghost" onClick=${onClose}
-                  style=${{ background: 'rgba(255,255,255,0.12)', color: '#fff', borderColor: 'transparent' }}>
-            ✕ 閉じる
-          </button>
+
+        <div class="preview-a4-wrap">
+          <${A4Document} doc=${doc} />
         </div>
-      </div>
 
-      <div class="preview-a4-wrap">
-        <${A4Document} doc=${doc} />
+        ${printCss}
       </div>
-
-      ${printCss}
-    </div>
+    </${PrintPortal}>
   `;
 }
 
@@ -76,11 +87,15 @@ function A4Document({ doc }) {
   const isReceipt  = doc.type === 'receipt';
   const isQuote    = doc.type === 'quote';
   const isDelivery = doc.type === 'delivery';
+  const isVoided   = doc.status === 'void' || doc.status === 'cancelled';
 
-  const showTaxSep = !doc.hideTaxBreakdown;
+  // 適格請求書（invoice）では税率別内訳の記載が必須のため hideTaxBreakdown を無効化
+  const showTaxSep = isInvoice || !doc.hideTaxBreakdown;
 
   return html`
     <div class="invoice-a4">
+      ${isVoided && html`<div class="invoice-void-badge">取　消</div>`}
+
       <${TitleBlock} title=${title} />
 
       <${MetaBlock} doc=${doc} showDue=${isInvoice} showExpiry=${isQuote} />
@@ -88,6 +103,10 @@ function A4Document({ doc }) {
       <${PromptLine} text=${prompt} />
 
       <${GrandTotal} totals=${totals} showTaxIncluded=${doc.showTaxIncluded} label=${isReceipt ? '領収金額' : isQuote ? '御見積金額' : '合計金額'} />
+
+      ${isReceipt && html`
+        <div class="invoice-proviso">但し ${doc.proviso || 'お品代として'}</div>
+      `}
 
       <${ItemsTable} items=${doc.items || []} />
 
@@ -104,7 +123,7 @@ function A4Document({ doc }) {
         <${BankBlock} doc=${doc} />
       `}
 
-      ${isReceipt && html`<${StampArea} />`}
+      ${isReceipt && html`<${StampArea} showRevenueStamp=${totals.total >= 50000} />`}
     </div>
   `;
 }
@@ -129,7 +148,7 @@ function MetaBlock({ doc, showDue, showExpiry }) {
         </div>
         ${(doc.clientPostal || doc.clientAddress) && html`
           <div class="invoice-client-address">
-            ${doc.clientPostal && ('〒' + doc.clientPostal + '\u3000')}
+            ${doc.clientPostal && ('〒' + doc.clientPostal + '　')}
             ${doc.clientAddress || ''}
           </div>
         `}
@@ -160,7 +179,7 @@ function MetaBlock({ doc, showDue, showExpiry }) {
           <div class="invoice-issuer-name">${doc.issuerCompany || ''}</div>
           ${(doc.issuerPostal || doc.issuerAddress) && html`
             <div class="invoice-issuer-addr">
-              ${doc.issuerPostal && ('〒' + doc.issuerPostal + '\u3000')}
+              ${doc.issuerPostal && ('〒' + doc.issuerPostal + '　')}
               ${doc.issuerAddress || ''}
             </div>
           `}
@@ -244,23 +263,46 @@ function ItemsTable({ items }) {
   `;
 }
 
+/**
+ * 税額サマリー（適格請求書の法定記載事項）:
+ * 税率ごとに区分した対価の額（税抜）、適用税率、税率ごとの消費税額を表示。
+ * 8% 対象が 0 件なら 10% のみ表示（byRate の gross が 0 の税率は省略）。
+ */
 function TaxSummary({ totals }) {
+  const byRate = totals.byRate || {};
+  const r10 = byRate['10'] || { net: 0, tax: 0, gross: 0 };
+  const r8  = byRate['8']  || { net: 0, tax: 0, gross: 0 };
+  const r0  = byRate['0']  || { net: 0, tax: 0, gross: 0 };
   return html`
     <table class="invoice-tax-summary">
       <tr>
         <th>小計（税抜）</th>
         <td class="num">${formatYen(totals.subtotal)}</td>
       </tr>
-      ${totals.tax10 > 0 && html`
+      ${r10.gross !== 0 && html`
         <tr>
-          <th>消費税 10%</th>
-          <td class="num">${formatYen(totals.tax10)}</td>
+          <th>10%対象（税抜）</th>
+          <td class="num">${formatYen(r10.net)}</td>
+        </tr>
+        <tr>
+          <th>消費税（10%）</th>
+          <td class="num">${formatYen(r10.tax)}</td>
         </tr>
       `}
-      ${totals.tax8 > 0 && html`
+      ${r8.gross !== 0 && html`
         <tr>
-          <th>消費税 8%（軽減）</th>
-          <td class="num">${formatYen(totals.tax8)}</td>
+          <th>8%対象・軽減（税抜）</th>
+          <td class="num">${formatYen(r8.net)}</td>
+        </tr>
+        <tr>
+          <th>消費税（8%）</th>
+          <td class="num">${formatYen(r8.tax)}</td>
+        </tr>
+      `}
+      ${r0.gross !== 0 && html`
+        <tr>
+          <th>非課税対象</th>
+          <td class="num">${formatYen(r0.net)}</td>
         </tr>
       `}
       <tr class="invoice-tax-summary-total">
@@ -301,9 +343,15 @@ function BankBlock({ doc }) {
   `;
 }
 
-function StampArea() {
+function StampArea({ showRevenueStamp }) {
   return html`
     <div class="invoice-stamp">
+      ${showRevenueStamp && html`
+        <div class="invoice-revenue-stamp">
+          <div class="invoice-revenue-stamp-box">収入印紙</div>
+          <div class="invoice-revenue-stamp-note">5万円以上</div>
+        </div>
+      `}
       <div class="invoice-stamp-box">印</div>
     </div>
   `;
@@ -344,6 +392,7 @@ const printCss = html`
 
   /* A4 page */
   .invoice-a4 {
+    position: relative;
     width: 210mm;
     min-height: 297mm;
     padding: 18mm 20mm;
@@ -354,6 +403,22 @@ const printCss = html`
     line-height: 1.6;
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
     box-sizing: border-box;
+  }
+
+  /* Void (取消) badge */
+  .invoice-void-badge {
+    position: absolute;
+    top: 14mm; right: 16mm;
+    padding: 4pt 14pt;
+    border: 2pt solid #c00;
+    color: #c00;
+    font-size: 16pt;
+    font-weight: 800;
+    letter-spacing: 0.3em;
+    transform: rotate(-8deg);
+    opacity: 0.75;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   /* Title */
@@ -477,6 +542,14 @@ const printCss = html`
     color: #555;
   }
 
+  /* 但し書き (receipt) */
+  .invoice-proviso {
+    margin: -6pt 0 14pt;
+    padding: 2pt 4pt;
+    font-size: 10.5pt;
+    border-bottom: 0.5pt solid #999;
+  }
+
   /* Items table */
   .invoice-items {
     width: 100%;
@@ -500,6 +573,14 @@ const printCss = html`
     vertical-align: top;
     min-height: 16pt;
   }
+  /* 複数ページ: 行の途中で改ページさせない（15行超は2ページ目に続く） */
+  .invoice-items tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .invoice-items thead {
+    display: table-header-group;  /* 2ページ目以降にもヘッダー行を繰り返す */
+  }
   .invoice-items-name {
     font-weight: 500;
   }
@@ -521,6 +602,8 @@ const printCss = html`
     margin-bottom: 14pt;
     border-collapse: collapse;
     min-width: 260pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .invoice-tax-summary th {
     text-align: left;
@@ -549,6 +632,8 @@ const printCss = html`
     padding: 10pt 12pt;
     border: 0.5pt solid #999;
     border-radius: 4pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .invoice-notes-label {
     font-size: 9pt;
@@ -567,6 +652,8 @@ const printCss = html`
     padding: 10pt 14pt;
     border: 1pt solid #000;
     background: #fafafa;
+    page-break-inside: avoid;
+    break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -595,8 +682,11 @@ const printCss = html`
 
   /* Stamp area for receipts */
   .invoice-stamp {
-    display: flex; justify-content: flex-end;
+    display: flex; justify-content: flex-end; align-items: flex-start;
+    gap: 16pt;
     margin-top: 20pt;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .invoice-stamp-box {
     width: 50pt; height: 50pt;
@@ -607,26 +697,51 @@ const printCss = html`
     border-radius: 50%;
     opacity: 0.6;
   }
+  /* 収入印紙欄（5万円以上の領収書） */
+  .invoice-revenue-stamp {
+    text-align: center;
+  }
+  .invoice-revenue-stamp-box {
+    width: 56pt; height: 66pt;
+    border: 1pt dashed #666;
+    color: #666;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9pt;
+    letter-spacing: 0.1em;
+    writing-mode: vertical-rl;
+  }
+  .invoice-revenue-stamp-note {
+    font-size: 7.5pt;
+    color: #999;
+    margin-top: 2pt;
+  }
 
   .mono { font-family: 'JetBrains Mono', 'Menlo', monospace; }
 
-  /* ===== Print ===== */
+  /* ===== Print =====
+     PrintPortal が overlay を body 直下に描画し、styles.css 側の
+     body.has-print-overlay ルールが #app を非表示・body を通常フローに
+     戻すため、visibility ハックや position:absolute は不要。 */
   @media print {
     @page { size: A4; margin: 0; }
-    body { background: #fff !important; }
-    body * { visibility: hidden; }
-    .invoice-a4, .invoice-a4 * { visibility: visible; }
-    .invoice-a4 {
-      position: absolute; top: 0; left: 0;
-      width: 210mm; min-height: 297mm;
-      margin: 0; box-shadow: none;
-    }
-    .preview-overlay { background: #fff !important; position: static; }
-    .preview-toolbar, .preview-a4-wrap {
+    .no-print { display: none !important; }
+    .preview-overlay {
+      position: static;
+      display: block;
       background: #fff !important;
     }
-    .preview-a4-wrap { padding: 0 !important; }
-    .no-print { display: none !important; }
+    .preview-a4-wrap {
+      display: block;
+      overflow: visible;
+      padding: 0 !important;
+      background: #fff !important;
+    }
+    .invoice-a4 {
+      width: 210mm;
+      min-height: auto;   /* 297mm 固定だと末尾に空白ページが出るため */
+      margin: 0;
+      box-shadow: none;
+    }
   }
 </style>
 `;

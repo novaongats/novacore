@@ -1,6 +1,8 @@
 /* ============================================================
    NOVA Core v2 — Payroll / Bonus calculation
-   Tax rate based on prev-month gross minus social insurance.
+   Tax rate based on prev-month taxable pay (excl. non-taxable
+   commute) minus social insurance, from the latest monthly
+   record strictly before the bonus month.
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -13,6 +15,37 @@ import { calcBonusPaycheck, getRatesFor } from './calc.js';
 import { PayslipOverlay } from './payslip.js';
 
 const html = htm.bind(h);
+
+// ---- 前月給与の税率基礎額（テスト用に export）-------------------------------
+
+/**
+ * 月次レコードから賞与税率決定用の
+ * 「前月の社会保険料等控除後の給与等の金額」を求める。
+ * rec.taxable = 総支給 − 非課税通勤手当 − 社保本人負担（＝控除後）なのでそのまま使う。
+ * taxable が無い旧データは gross − 非課税通勤手当 − 社保 で代替。
+ */
+export function prevMonthTaxBasis(rec) {
+  if (!rec) return 0;
+  if (rec.taxable != null) return Math.max(0, Number(rec.taxable) || 0);
+  return Math.max(0,
+    (Number(rec.gross) || 0)
+    - (Number(rec.commuteNonTaxable) || 0)
+    - (Number(rec.social) || 0));
+}
+
+/**
+ * 賞与対象月（bonusMonth）より前の月のうち最新の月次レコードを従業員ごとに選ぶ。
+ * @param records 月次レコード配列（month 降順ソート済みでなくてもよい）
+ */
+export function pickPrevMonthRecords(records, bonusMonth) {
+  const m = new Map();
+  for (const r of records || []) {
+    if (!r || !r.month || !bonusMonth || r.month >= bonusMonth) continue;
+    const cur = m.get(r.empId);
+    if (!cur || r.month > cur.month) m.set(r.empId, r);
+  }
+  return m;
+}
 
 export function BonusTab() {
   const [month, setMonth] = useState(thisMonth());
@@ -46,14 +79,11 @@ export function BonusTab() {
 
   const empList = asArray(employees.data).filter(e => !e.archived);
   const bonusMap = new Map(asArray(bonuses.data).map(b => [b.empId, b]));
-  // Most recent monthly record per employee (for prev-month calculation)
-  const recentByEmp = useMemo(() => {
-    const m = new Map();
-    for (const r of asArray(recentMonthly.data)) {
-      if (!m.has(r.empId)) m.set(r.empId, r);  // already sorted desc
-    }
-    return m;
-  }, [recentMonthly.data]);
+  // 賞与対象月より前の月のうち最新の月次レコード（税率決定の「前月給与」）
+  const prevByEmp = useMemo(
+    () => pickPrevMonthRecords(asArray(recentMonthly.data), month),
+    [recentMonthly.data, month],
+  );
 
   const selectedEmp = empList.find(e => e.id === selectedEmpId);
 
@@ -93,14 +123,18 @@ export function BonusTab() {
             onSelect=${setSelectedEmpId}
           />
           <div>
-            ${selectedEmp ? html`
+            ${(bonuses.loading || recentMonthly.loading) ? html`
+              <div class="card" style=${{ padding: '40px', textAlign: 'center', color: 'var(--text-3)' }}>
+                ${monthLabel(month)} の賞与データを読込中...
+              </div>
+            ` : selectedEmp ? html`
               <${BonusPanel}
                 key=${selectedEmp.id + '|' + month}
                 emp=${selectedEmp}
                 month=${month}
                 rates=${rates}
                 existing=${bonusMap.get(selectedEmp.id)}
-                recentRec=${recentByEmp.get(selectedEmp.id)}
+                recentRec=${prevByEmp.get(selectedEmp.id)}
                 onPreview=${(rec) => setPreview({ records: [rec], kind: 'bonus' })}
               />
             ` : html`
@@ -168,11 +202,9 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
-  // Previous month's (gross - social) — used to determine tax rate
-  const prevAfterSocial = useMemo(() => {
-    if (!recentRec) return 0;
-    return Math.max(0, (recentRec.gross || 0) - (recentRec.social || 0));
-  }, [recentRec]);
+  // 前月の「社会保険料等控除後の給与等の金額」— 賞与税率の決定に使用。
+  // 非課税通勤手当を除いた課税支給額から社保を引いた金額（= rec.taxable）。
+  const prevAfterSocial = useMemo(() => prevMonthTaxBasis(recentRec), [recentRec]);
 
   const calc = useMemo(() => calcBonusPaycheck(emp, {
     month,
@@ -258,7 +290,7 @@ function BonusPanel({ emp, month, rates, existing, recentRec, onPreview }) {
             ${formatYen(prevAfterSocial)}
           </span>
           ${!recentRec && html`<span style=${{ marginLeft: 8, color: 'var(--danger)' }}>
-            (月次給与未計算 → 税率=扶養のみ適用)
+            (${monthLabel(month)}より前の月次給与が未計算 → 前月給与0円として税率を判定)
           </span>`}
           <div style=${{ marginTop: 4, fontSize: 11, color: 'var(--text-3)' }}>
             この金額と扶養人数（${emp.dependents || 0}人）で賞与所得税率が決まります。
