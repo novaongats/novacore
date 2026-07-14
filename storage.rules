@@ -5,10 +5,27 @@ rules_version = '2';
 //
 // 適用方法: Firebase Console → Storage → ルール に全文貼付して「公開」
 // （書類管理・レシートスキャンの原本アップロードが対象）
+//
+// 方針:
+//   - ログイン必須が大前提
+//   - payroll/ 配下（給与明細PDF等を将来置く場合）は admin 限定
+//     （Firestore の users/{uid}.level を参照するクロスサービスルール）
 // ============================================================
 
 service firebase.storage {
   match /b/{bucket}/o {
+
+    function isAdmin() {
+      return request.auth != null
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.level == 'admin';
+    }
+
+    // 給与系ファイル（機微情報）: admin 限定
+    match /payroll/{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // その他（書類管理・レシート原本）: ログインユーザー
     match /{allPaths=**} {
       allow read, write: if request.auth != null;
     }

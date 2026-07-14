@@ -9,6 +9,7 @@
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
+import { useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { useDoc, repos } from '../../store.js';
 import { downloadCsv } from './data.js';
@@ -19,6 +20,13 @@ export function TaxDocOverlay({ spec, onClose }) {
   const issuerQ = useDoc(repos.settings, 'invoiceIssuer');
   const company = issuerQ.data?.companyName || '有限会社NOVA';
   const printed = new Date().toLocaleDateString('ja-JP');
+
+  // 横向き書類は @page を切替え、閉じたら必ず縦に戻す
+  // （残留すると給与明細・請求書の印刷まで横向きになる）
+  useEffect(() => {
+    applyPageOrientation(!!spec.landscape);
+    return () => applyPageOrientation(false);
+  }, [spec]);
 
   return html`
     <div class="taxdoc-overlay">

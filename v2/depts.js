@@ -19,8 +19,11 @@ let _seeding = false;
 
 export function initDepts() {
   if (_unsub) return;
-  _unsub = repos.salesDepts.subscribe(async (docs) => {
+  _unsub = repos.salesDepts.subscribe(async (docs, snap) => {
     if (!docs || docs.length === 0) {
+      // サーバー確認前のキャッシュ空スナップショットではシードしない
+      // （archived フラグ等を静的既定値で巻き戻す事故を防ぐ）
+      if (snap?.metadata?.fromCache) return;
       // 初回のみ静的5部門をシード（並行アクセスでも setId は冪等）
       if (_seeding) return;
       _seeding = true;
@@ -47,6 +50,11 @@ export function initDepts() {
       }))
       .sort((a, b) => (a.order - b.order) || a.key.localeCompare(b.key));
     setDepts(list);
+  }, (err) => {
+    // permission-denied 等でリスナーが死んだら購読状態をリセットし、
+    // 再ログイン後の initDepts() で復活できるようにする。
+    console.warn('[depts] subscribe error, falling back to static:', err);
+    stopDepts();
   });
 }
 

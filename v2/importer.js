@@ -538,7 +538,8 @@ export async function runImport(legacyJson, onProgress = () => {}, { merge = fal
           label: `${job.def.repo} (${written}件)`,
         });
       } catch (e) {
-        failed += chunk.length;
+        // skipped（id空でbatchに載せていない分）を failed に二重計上しない
+        failed += written;
         const reason = e.message || String(e);
         errors.push({ key: job.legacyKey, reason });
         console.error('[import] batch failed for', job.legacyKey, e);

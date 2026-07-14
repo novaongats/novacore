@@ -247,6 +247,13 @@ function formatSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(2) + ' MB';
 }
 
+// localStorage のキー名は外部由来になり得るため innerHTML 挿入前に無害化する
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function scan() {
   const rows = [];
   const buckets = { core: {}, ancore: {}, boat: {}, legacy: {}, secret: {}, other: {} };
@@ -287,7 +294,7 @@ function scan() {
           else if (parsed && typeof parsed === 'object') recordCount = Object.keys(parsed).length + ' 項目';
           return `
             <tr>
-              <td style="font-family:'JetBrains Mono', monospace; font-size:12px">${r.key}</td>
+              <td style="font-family:'JetBrains Mono', monospace; font-size:12px">${escapeHtml(r.key)}</td>
               <td><span class="pill pill-${r.bucket}">${bucketLabel(r.bucket)}</span></td>
               <td>${recordCount}</td>
               <td class="num">${formatSize(r.bytes)}</td>

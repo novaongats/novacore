@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0c0c14">
 <title>NOVA Core v2</title>
-<link rel="manifest" href="/manifest.json">
+<!-- 注意: ルートの /manifest.json（v1 PWA）はここでは読み込まない。
+     v2 から PWA インストールすると v1 が起動する混線を防ぐため、
+     v2 の PWA 化は v1 廃止後にルートで行う。 -->
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./styles.css">
 </head>

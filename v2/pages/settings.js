@@ -358,7 +358,7 @@ function DataTab() {
 
   async function doImport() {
     if (!raw) return;
-    if (!confirm('Firestoreへインポートを開始します。同じIDのドキュメントは上書き（merge）されます。よろしいですか？')) return;
+    if (!confirm('Firestoreへインポートを開始します。同じIDのドキュメントは丸ごと置き換えられます（v2側で編集済みの内容も消えます）。よろしいですか？')) return;
     setResult(null);
     setProgress({ current: 0, total: 0, label: '準備中' });
     try {
@@ -377,7 +377,8 @@ function DataTab() {
       <div class="note note-info">
         v1 の <code>index.html</code> から <code>tools/export-legacy.html</code> で書き出した
         JSON ファイル（<code>novacore-main-YYYY-MM-DD.json</code>）を選択してください。<br/>
-        既存のドキュメントはマージされます（上書きではなく差分更新）。
+        同じIDの既存ドキュメントは<strong>丸ごと置き換え</strong>られます。
+        v2側で修正済みのデータ（従業員の扶養人数など）は再インポート後に再修正が必要です。
       </div>
       ${err && html`<div class="note note-err">${err}</div>`}
 

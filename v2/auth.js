@@ -14,6 +14,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { useState, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import { auth, db } from './firebase.js';
+import { stopDepts } from './depts.js';
 
 // Users log in with a short ID (e.g. "z"). We synthesize an email
 // so Firebase Auth has something to work with.
@@ -75,24 +76,10 @@ export async function listUsers() {
 
 export async function signIn(id, password) {
   const email = idToEmail(id);
+  // プロフィールの読込・欠落時シードは useAuth（onAuthStateChanged）に
+  // 一本化する。ここでも書くと2経路の setDoc が競合するため行わない。
   const cred = await signInWithEmailAndPassword(auth, email, password);
-  let profile = await loadProfile(cred.user.uid);
-
-  // First-login seed: if profile is missing, create a minimal one.
-  if (!profile) {
-    const seed = {
-      userId: String(id).trim().toLowerCase(),
-      name: id,
-      role: 'スタッフ',
-      color: '#6366f1',
-      level: 'staff',
-      pages: ['home'],
-      createdAt: serverTimestamp(),
-    };
-    await saveProfile(cred.user.uid, seed);
-    profile = { uid: cred.user.uid, ...seed };
-  }
-  return profile;
+  return cred.user;
 }
 
 export async function signOut() {
@@ -101,6 +88,7 @@ export async function signOut() {
     location.reload();
     return;
   }
+  stopDepts(); // permission-denied で死んだ購読を残さない（再ログインで復活）
   await fbSignOut(auth);
 }
 
@@ -170,15 +158,19 @@ export function useAuth() {
       try {
         let profile = await loadProfile(fbUser.uid);
         if (!profile) {
-          // Seed from the Firebase Auth email if profile doc is missing.
+          // プロフィール欠落時は staff（home のみ）でシードする。
+          // 以前は admin でシードしていたが、それだと「プロフィール作成に
+          // 失敗したユーザーが次回ログインで自動 admin になる」権限昇格穴に
+          // なる。初代 admin は Firebase Console で users/{uid} を
+          // { level:'admin', pages:['*'] } として手動作成する（firestore.rules 参照）。
           const localPart = (fbUser.email || '').split('@')[0] || fbUser.uid;
           const seed = {
             userId: localPart,
             name: localPart,
-            role: '管理者',
+            role: 'スタッフ',
             color: '#6366f1',
-            level: 'admin',
-            pages: ['*'],
+            level: 'staff',
+            pages: ['home'],
             createdAt: serverTimestamp(),
           };
           await saveProfile(fbUser.uid, seed);

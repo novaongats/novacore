@@ -179,3 +179,38 @@ export function groupBy(arr, keyFn) {
 
 /** Defensive: always return array. */
 export function asArray(v) { return Array.isArray(v) ? v : []; }
+
+// ---- CSV -------------------------------------------------------------------
+
+/**
+ * CSV セルの共通エスケープ。
+ * - カンマ・引用符・改行を含むセルは quote + "" エスケープ
+ * - `=` `+` `@` 始まりは Excel が数式として評価するため `'` を前置して無害化
+ *   （数値は Number のまま渡せば影響なし）
+ */
+export function csvCell(v) {
+  if (v == null) return '';
+  if (typeof v === 'number') return String(v);
+  let s = String(v);
+  if (/^[=+@]/.test(s)) s = "'" + s;
+  if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+/** 2次元配列 → CSV 文字列（BOM 付き、Excel で文字化けしない）。 */
+export function toCsv(rows) {
+  return '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+}
+
+/** テキストをファイルとしてダウンロードさせる。 */
+export function downloadTextFile(text, filename, mime = 'text/csv') {
+  const blob = new Blob([text], { type: mime + ';charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}

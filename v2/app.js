@@ -6,7 +6,7 @@
 import { h, render } from 'https://esm.sh/preact@10.22.0';
 import { useState, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
-import { useAuth, signIn, signOut, hasAccess, enableDevBypass } from './auth.js';
+import { useAuth, signIn, signOut, hasAccess, enableDevBypass, changePassword } from './auth.js';
 import { initDepts } from './depts.js';
 import { SettingsPage } from './pages/settings.js';
 import { SalesPage } from './pages/sales/index.js';
@@ -158,9 +158,9 @@ function LoginScreen() {
 
 // ---- Sidebar ---------------------------------------------------------------
 
-function Sidebar({ route, user, onNavigate }) {
+function Sidebar({ route, user, onNavigate, open }) {
   return html`
-    <aside class="sidebar">
+    <aside class=${'sidebar' + (open ? ' open' : '')}>
       <div class="sb-header">
         <div class="sb-logo">N</div>
         <div>
@@ -194,7 +194,7 @@ function Sidebar({ route, user, onNavigate }) {
 
 // ---- Topbar ----------------------------------------------------------------
 
-function Topbar({ route, user, onLogout }) {
+function Topbar({ route, user, onLogout, onMenu }) {
   const item = NAV.find(n => n.id === route);
   const title = item ? item.label : 'NOVA Core';
   const today = new Date().toLocaleDateString('ja-JP', {
@@ -202,9 +202,12 @@ function Topbar({ route, user, onLogout }) {
   });
   return html`
     <header class="topbar">
-      <div>
-        <div class="topbar-title">${title}</div>
-        <div class="topbar-sub">有限会社NOVA · ${today}</div>
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button class="menu-btn" onClick=${onMenu} aria-label="メニュー">☰</button>
+        <div>
+          <div class="topbar-title">${title}</div>
+          <div class="topbar-sub">有限会社NOVA · ${today}</div>
+        </div>
       </div>
       <div class="topbar-actions">
         <div class="user-chip">
@@ -217,6 +220,59 @@ function Topbar({ route, user, onLogout }) {
         <div class="badge badge-sync"><span class="dot"></span>同期中</div>
       </div>
     </header>
+  `;
+}
+
+// ---- Forced password change (first login) ----------------------------------
+
+function ChangePasswordScreen({ user }) {
+  const [p1, setP1] = useState('');
+  const [p2, setP2] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (p1.length < 8) { setErr('パスワードは8文字以上にしてください'); return; }
+    if (p1 !== p2) { setErr('確認用パスワードが一致しません'); return; }
+    setBusy(true);
+    setErr('');
+    try {
+      await changePassword(p1);
+      location.reload();
+    } catch (e2) {
+      setBusy(false);
+      setErr(e2?.code === 'auth/requires-recent-login'
+        ? '一度ログアウトして再ログイン後にもう一度お試しください'
+        : '変更に失敗しました: ' + (e2?.message || e2));
+    }
+  }
+
+  return html`
+    <div class="login-scrim">
+      <form class="login-card" onSubmit=${submit}>
+        <div class="login-logo">N</div>
+        <div class="login-title">パスワードの変更</div>
+        <div class="login-subtitle">
+          ${user.name} さん、初回ログインのため新しいパスワードを設定してください
+        </div>
+        <div style="margin-top: 24px"></div>
+        <div class="field">
+          <label>新しいパスワード（8文字以上）</label>
+          <input type="password" autocomplete="new-password" disabled=${busy}
+                 value=${p1} onInput=${e => setP1(e.target.value)} autofocus />
+        </div>
+        <div class="field">
+          <label>新しいパスワード（確認）</label>
+          <input type="password" autocomplete="new-password" disabled=${busy}
+                 value=${p2} onInput=${e => setP2(e.target.value)} />
+        </div>
+        <button type="submit" class="login-btn" disabled=${busy}>
+          ${busy ? '変更中...' : '変更してはじめる'}
+        </button>
+        <div class="login-error">${err}</div>
+      </form>
+    </div>
   `;
 }
 
@@ -267,12 +323,16 @@ function App() {
 
   if (error) return html`<${ErrorScreen} error=${error} />`;
   if (!user) return html`<${LoginScreen} />`;
+  if (user.mustChangePassword && !user._devBypass) {
+    return html`<${ChangePasswordScreen} user=${user} />`;
+  }
 
   return html`<${AuthenticatedApp} user=${user} />`;
 }
 
 function AuthenticatedApp({ user }) {
   const route = useRoute();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // 事業（部門）マスタの購読開始（デモモードでは静的フォールバックのまま）
   useEffect(() => {
@@ -280,13 +340,14 @@ function AuthenticatedApp({ user }) {
   }, [user]);
 
   // Guard: if user lacks access to current route, bounce to home.
+  const allowed = hasAccess(user, route) || user.level === 'admin';
   useEffect(() => {
-    if (!hasAccess(user, route) && user.level !== 'admin' && route !== DEFAULT_PAGE) {
-      navigate(DEFAULT_PAGE);
-    }
+    if (!allowed && route !== DEFAULT_PAGE) navigate(DEFAULT_PAGE);
   }, [route, user]);
 
-  const PageComp = PAGES[route] || PAGES[DEFAULT_PAGE];
+  // 権限外ページはリダイレクト前の1レンダーでもマウントさせない
+  // （購読開始・UIフラッシュ防止）。
+  const PageComp = allowed ? (PAGES[route] || PAGES[DEFAULT_PAGE]) : PAGES[DEFAULT_PAGE];
 
   async function handleLogout() {
     try { await signOut(); } catch (e) { console.warn(e); }
@@ -294,9 +355,14 @@ function AuthenticatedApp({ user }) {
 
   return html`
     <div class="app-shell">
-      <${Sidebar} route=${route} user=${user} onNavigate=${navigate} />
+      <${Sidebar} route=${route} user=${user} open=${menuOpen}
+                  onNavigate=${(id) => { setMenuOpen(false); navigate(id); }} />
+      ${menuOpen && html`
+        <div class="sidebar-backdrop" onClick=${() => setMenuOpen(false)}></div>
+      `}
       <div class="main">
-        <${Topbar} route=${route} user=${user} onLogout=${handleLogout} />
+        <${Topbar} route=${route} user=${user} onLogout=${handleLogout}
+                   onMenu=${() => setMenuOpen(o => !o)} />
         <main class="content">
           <${PageComp} user=${user} />
         </main>

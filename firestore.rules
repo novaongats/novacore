@@ -33,12 +33,18 @@ service cloud.firestore {
     }
 
     // ---- ユーザープロフィール ------------------------------------
-    // create: 初回ログイン時の自己シード（auth.js）を許可。
-    //         アカウント自体は admin / Console でしか作れないため安全。
+    // create: admin は任意の内容で作成可。本人による自己シード
+    //         （auth.js の初回ログインシード）は level=='staff' かつ
+    //         pages==['home'] に限定 — admin を名乗る自己作成は不可。
+    //         初代 admin は Firebase Console で users/{uid} を
+    //         { level:'admin', pages:['*'] } として手動作成すること。
     // update: admin は全て可。本人は level / pages を変えない限り可。
     match /users/{uid} {
       allow read:   if isSelf(uid) || isAdmin();
-      allow create: if isSelf(uid) || isAdmin();
+      allow create: if isAdmin()
+                    || (isSelf(uid)
+                        && request.resource.data.level == 'staff'
+                        && request.resource.data.pages == ['home']);
       allow update: if isAdmin()
                     || (isSelf(uid)
                         && request.resource.data.level == resource.data.level

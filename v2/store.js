@@ -14,6 +14,20 @@ import {
 import { useState, useEffect, useRef } from 'https://esm.sh/preact@10.22.0/hooks';
 import { db, storage } from './firebase.js';
 
+// デモモード判定。auth.js と同じキーを見るが、auth.js を import すると
+// store → auth → depts → store の循環になるためここで直接読む。
+function isDevBypass() {
+  try { return localStorage.getItem('nova_v2_dev_bypass') === '1'; }
+  catch { return false; }
+}
+
+// デモモード（UI確認のみ）では書込を全面ブロックする。
+function guardWrite() {
+  if (isDevBypass()) {
+    throw new Error('デモモード中はデータを保存できません（UI確認のみ）');
+  }
+}
+
 // Re-export query helpers so pages don't need to know the CDN path.
 export { where, orderBy, limit, startAt, endAt };
 
@@ -44,6 +58,7 @@ export function createRepo(name) {
      * Returns the document id.
      */
     async upsert(data) {
+      guardWrite();
       const payload = { ...data, updatedAt: serverTimestamp() };
       if (data.id) {
         const { id, ...rest } = payload;
@@ -56,6 +71,7 @@ export function createRepo(name) {
 
     /** Set a document with an explicit id (overwrite/merge). */
     async setId(id, data, { merge = true } = {}) {
+      guardWrite();
       await setDoc(
         doc(db, name, id),
         { ...data, updatedAt: serverTimestamp() },
@@ -64,15 +80,23 @@ export function createRepo(name) {
     },
 
     async remove(id) {
+      guardWrite();
       await deleteDoc(doc(db, name, id));
     },
 
-    /** Live subscription to the full collection (or a query). */
-    subscribe(callback, ...constraints) {
+    /**
+     * Live subscription to the full collection (or a query).
+     * callback(rows, snapshot) — snapshot はメタデータ（fromCache 等）の参照用。
+     * onError は省略可（省略時は console.error のみ）。
+     */
+    subscribe(callback, onError, ...constraints) {
       const q = constraints.length ? query(ref(), ...constraints) : ref();
       return onSnapshot(q,
-        (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-        (err) => console.error(`[store] ${name} subscribe error:`, err)
+        (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() })), snap),
+        (err) => {
+          console.error(`[store] ${name} subscribe error:`, err);
+          if (typeof onError === 'function') onError(err);
+        }
       );
     },
   };
@@ -126,14 +150,15 @@ export function useCollection(repo, buildQuery = null, deps = []) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Note: When Firestore rules require auth but dev-bypass is on,
-    // subscriptions will error out with permission-denied. That surfaces
-    // in the error state so pages display a useful message instead of
-    // hanging forever.
+    // デモモード: Firebase に触れず空データを即返す（UI確認のみ）。
+    if (isDevBypass()) { setData([]); setError(null); return; }
     let alive = true;
     const constraints = buildQuery ? buildQuery(repo) : [];
     const unsub = repo.subscribe(
       (rows) => { if (alive) { setData(rows); setError(null); } },
+      // 購読エラー（permission-denied 等）は error に表面化させ、
+      // loading を解除して無限スケルトンを防ぐ。
+      (err) => { if (alive) { setData([]); setError(err); } },
       ...constraints,
     );
     return () => { alive = false; unsub(); };
@@ -147,21 +172,25 @@ export function useCollection(repo, buildQuery = null, deps = []) {
 export function useDoc(repo, id) {
   const [data, setData]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!id) { setData(null); setLoading(false); return; }
+    if (isDevBypass()) { setData(null); setLoading(false); return; }
     setLoading(true);
+    setError(null);
     const unsub = onSnapshot(doc(db, repo.name, id), (snap) => {
       setData(snap.exists() ? { id: snap.id, ...snap.data() } : null);
       setLoading(false);
     }, (err) => {
       console.error(`[store] ${repo.name}/${id} subscribe error:`, err);
+      setError(err);
       setLoading(false);
     });
     return unsub;
   }, [repo, id]);
 
-  return { data, loading };
+  return { data, loading, error };
 }
 
 // ---- Firebase Storage helpers ---------------------------------------------
@@ -171,6 +200,7 @@ export function useDoc(repo, id) {
  * Returns { url, storagePath, originalName, size, contentType }.
  */
 export async function uploadFile(file, ...pathParts) {
+  guardWrite();
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 6);
   const ext = (file.name || '').split('.').pop() || 'bin';

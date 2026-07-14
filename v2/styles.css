@@ -586,3 +586,32 @@ button, input, select, textarea {
 .note-info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 .note-ok   { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
 .note-err  { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
+/* ----- Mobile menu toggle ----- */
+.menu-btn {
+  display: none;
+  border: 1px solid var(--border); background: var(--surface);
+  border-radius: 8px; padding: 6px 10px; font-size: 16px;
+  cursor: pointer; color: var(--text-2); line-height: 1;
+}
+.sidebar-backdrop { display: none; }
+@media (max-width: 768px) {
+  .menu-btn { display: inline-block; }
+  .sidebar-backdrop {
+    display: block; position: fixed; inset: 0;
+    background: rgba(12, 12, 20, 0.45); z-index: 199;
+  }
+}
+
+/* ---- 印刷オーバーレイ（v2/print.js の PrintPortal と対） ----------------
+   overlay は body 直下に描画されるため、印刷時は #app を丸ごと消し、
+   body の height:100vh / overflow を解除して複数ページの改ページを通す。 */
+@media print {
+  body.has-print-overlay #app { display: none !important; }
+  html.has-print-overlay,
+  body.has-print-overlay {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+}

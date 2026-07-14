@@ -23,7 +23,7 @@ import {
   buildTaxSummary, buildWageLedger, buildInvoiceList, buildTrend,
   downloadCsv,
 } from './data.js';
-import { TaxDocOverlay, applyPageOrientation } from './print.js';
+import { TaxDocOverlay } from './print.js';
 
 const html = htm.bind(h);
 
@@ -108,9 +108,7 @@ export function TaxReportPage() {
 
   function open(docId) {
     const spec = buildSpec(docId);
-    if (!spec) return;
-    applyPageOrientation(!!spec.landscape);
-    setActive(spec);
+    if (spec) setActive(spec);
   }
 
   function csv(docId) {
