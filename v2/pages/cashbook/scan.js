@@ -540,6 +540,10 @@ function ResultCard({ result, accounts, depts, bizDepts, threshold, analyzing, o
             </div>
           `}
 
+          ${/* 解析実行中は編集も不可（解析ループの setResultsSync が編集内容を
+                AI値で巻き戻すため）。fieldset disabled で配下の入力を一括無効化 */ ''}
+          <fieldset disabled=${analyzing}
+                    style=${{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
           <div style=${{
             display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
             gap: 8,
@@ -596,6 +600,7 @@ function ResultCard({ result, accounts, depts, bizDepts, threshold, analyzing, o
               `}
             </div>
           `}
+          </fieldset>
           ${result.data?.notes && html`
             <div style=${{
               marginTop: 8, padding: '6px 10px', background: 'var(--bg-alt)',

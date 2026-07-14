@@ -109,7 +109,9 @@ export function calcAnnualTax(annualGross, annualSocial, dependents, year) {
   // 年調年税額 = 算出所得税額 × 102.1%（復興特別所得税込み）の100円未満切捨て
   // baseTax × 1021 は整数演算なので浮動小数点誤差なし
   const totalTax = Math.floor(baseTax * 1021 / 100000) * 100;
-  const reconstructionTax = totalTax - baseTax;  // 復興特別所得税相当（100円未満切捨て後の差分）
+  // 復興特別所得税相当（100円未満切捨て後の差分）。極小の税額では
+  // 切捨てで差分が負になり得るため表示用に0で下限（年税合計は影響なし）。
+  const reconstructionTax = Math.max(0, totalTax - baseTax);
   return {
     salDed, income, basic, depDed,
     taxable, baseTax, reconstructionTax,

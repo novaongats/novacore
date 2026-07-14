@@ -324,6 +324,18 @@ export function buildExpenseLedger({ month, scope, depts, cats, entries, costs, 
          ['現金出納帳', e.dept || '-', e.vendor || '', e.memo || '', yen(v)],
          v);
   }
+  // v1移行の経費レコード（type:'expense'）。損益サマリー・月次推移と同じ計上で、
+  // 経費帳の総合計が他書類の経費合計と一致するようにする。
+  for (const e of entries) {
+    if (!isLegacyExpense(e)) continue;
+    const dept = entryDept(e, catMap);
+    if (scope !== 'all' && dept !== scope) continue;
+    const v = Number(e.amount) || 0;
+    if (!v) continue;
+    push('移行経費（v1手入力）',
+         ['v1移行', deptLabel(dept), e.category || '', [e.date, e.memo].filter(Boolean).join(' '), yen(v)],
+         v);
+  }
 
   const sections = [...groups.entries()]
     .sort((a, b) => b[1].total - a[1].total)
@@ -353,7 +365,7 @@ export function buildExpenseLedger({ month, scope, depts, cats, entries, costs, 
     }],
     grandTotal: { label: '経費 総合計', value: yen(grandTotal) },
     footnotes: [
-      '金額は税込。「月次コスト」「現金出納帳」「レベニューシェア外注費」の合算。',
+      '金額は税込。「月次コスト」「現金出納帳」「レベニューシェア外注費」（および v1移行経費がある月はその分）の合算。',
       scope !== 'all' ? '現金出納帳の明細は、部門（deptKey）または部門名が一致するもののみ表示しています。' : null,
       cashbookUnmatchedFootnote(scope, cashbook, depts),
     ].filter(Boolean),
@@ -436,9 +448,11 @@ export function buildTaxSummary({ month, scope, depts, cats, entries, costs, cas
   const sales = sumBy(entries.filter(e => inScope(e) && !isLegacyExpense(e)), e => e.amount);
   const recvTax = Math.round(sales * 10 / 110);
 
-  // 請求書ベース（発行済・入金済のみ、参考値）
+  // 請求書ベース（当月発行の発行済・入金済のみ、参考値）
   const issued = invoices.filter(i =>
-    i.type === 'invoice' && (i.status === 'issued' || i.status === 'paid'));
+    i.type === 'invoice'
+    && (i.issueDate || '').startsWith(month)
+    && (i.status === 'issued' || i.status === 'paid'));
   const invTax10 = sumBy(issued, i => i.tax10);
   const invTax8  = sumBy(issued, i => i.tax8);
 

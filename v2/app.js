@@ -62,7 +62,21 @@ function getRoute() {
 function useRoute() {
   const [route, setRoute] = useState(getRoute());
   useEffect(() => {
-    const onHash = () => setRoute(getRoute());
+    // 離脱ガードはここ（hashchange）に一元化する。サイドバー遷移だけでなく
+    // ブラウザの戻る/進む・直接のハッシュ変更もカバーするため。
+    let current = getRoute();
+    let reverting = false;
+    const onHash = () => {
+      const next = getRoute();
+      if (reverting) { reverting = false; return; }
+      if (next !== current && !confirmNavAway()) {
+        reverting = true;
+        location.hash = '#/' + current; // 元のページに戻す（この変更では再確認しない）
+        return;
+      }
+      current = next;
+      setRoute(next);
+    };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -364,7 +378,7 @@ function AuthenticatedApp({ user }) {
     <div class="app-shell">
       <${Sidebar} route=${route} user=${user} open=${menuOpen}
                   onNavigate=${(id) => {
-                    if (id !== route && !confirmNavAway()) return; // 編集中の破棄防止
+                    // 離脱ガードは useRoute の hashchange 側で一元処理される
                     setMenuOpen(false);
                     navigate(id);
                   }} />
