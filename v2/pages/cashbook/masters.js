@@ -150,7 +150,7 @@ function MasterSection({ title, repo, defaults, placeholder }) {
             padding: 20, textAlign: 'center', color: 'var(--text-3)',
             border: '1px dashed var(--border)', borderRadius: 10,
           }}>
-            まだ項目がありません。<br>
+            まだ項目がありません。<br/>
             上の入力欄から追加するか、「📦 デフォルトをインポート」をクリックしてください。
           </div>
         ` : html`

@@ -280,7 +280,7 @@ function ApiKeyStatus({ apiKey }) {
   return html`
     <div class="note note-warn" style=${{ marginBottom: 16 }}>
       ⚠ <strong>Claude APIキーが未設定です。</strong>
-      「設定」→「API設定」タブから登録してください。<br>
+      「設定」→「API設定」タブから登録してください。<br/>
       <a href="#/settings" style=${{ color: 'var(--primary)', fontSize: 12 }}>→ 設定画面を開く</a>
     </div>
   `;

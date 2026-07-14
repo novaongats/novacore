@@ -73,8 +73,8 @@ export function RatesTab() {
   return html`
     <div style=${{ maxWidth: 920 }}>
       <div class="note note-info">
-        料率は<strong>適用開始年月つきの履歴</strong>で管理します。給与計算は対象月に有効な料率を自動で使います。<br>
-        年度改定（健保・介護は3月分〜、雇用保険は4月〜）のたびに行を追加してください。<br>
+        料率は<strong>適用開始年月つきの履歴</strong>で管理します。給与計算は対象月に有効な料率を自動で使います。<br/>
+        年度改定（健保・介護は3月分〜、雇用保険は4月〜）のたびに行を追加してください。<br/>
         「最新プリセットを適用」でアプリに同梱された公表料率をワンクリック登録できます
         （出典: 協会けんぽ・厚生労働省。外部サイトからの自動取得は行いません）。
       </div>
@@ -94,8 +94,8 @@ export function RatesTab() {
         list.length === 0 ? html`
           <div class="card" style=${{ padding: '36px 20px', textAlign: 'center', color: 'var(--text-3)' }}>
             <div style=${{ fontSize: 30, marginBottom: 8, opacity: .4 }}>📊</div>
-            料率履歴がまだありません。<br>
-            まず「最新プリセットを適用」を押してください。<br>
+            料率履歴がまだありません。<br/>
+            まず「最新プリセットを適用」を押してください。<br/>
             <span style=${{ fontSize: 11 }}>
               （履歴が無い月は既定値: 東京${DEFAULT_HEALTH_RATES.tokyo}% / 介護${DEFAULT_CARE_RATE}% /
               厚年${PENSION_RATE}% / 雇保${DEFAULT_EMPLOYMENT_RATES.employee}% で計算されます）
@@ -154,7 +154,7 @@ export function RatesTab() {
             </table>
           </div>
           <div style=${{ marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
-            ※ 料率はすべて<strong>折半前の総料率</strong>。従業員負担は半額（雇用保険を除く）。<br>
+            ※ 料率はすべて<strong>折半前の総料率</strong>。従業員負担は半額（雇用保険を除く）。<br/>
             ※ 子ども・子育て支援金は2026年4月分から健保加入者に適用されます（それ以前の月は自動的に0円）。
           </div>
         `}

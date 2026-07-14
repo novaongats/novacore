@@ -500,8 +500,8 @@ function BatchModal({ employees, recordMap, month, rates, onClose }) {
         </div>
         <div style=${{ padding: 20 }}>
           <div class="note note-info">
-            従業員マスタの「月給」「時給 × 月平均労働時間」「通勤手当」をベースに自動計算します。<br>
-            歩合給・諸手当などは計算後に個別調整してください。<br>
+            従業員マスタの「月給」「時給 × 月平均労働時間」「通勤手当」をベースに自動計算します。<br/>
+            歩合給・諸手当などは計算後に個別調整してください。<br/>
             役員など毎月固定の方は、これだけで計算が完了します。
           </div>
 

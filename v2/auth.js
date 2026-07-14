@@ -5,7 +5,6 @@
 
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut as fbSignOut,
   onAuthStateChanged,
   updatePassword,
@@ -109,19 +108,36 @@ export async function signOut() {
 
 /**
  * Create a new user. Only admins should call this.
- * Note: createUserWithEmailAndPassword signs in AS the new user.
- * After creation, the admin needs to sign back in.
+ * createUserWithEmailAndPassword はそのインスタンスで新規ユーザーとして
+ * ログインしてしまうため、使い捨ての secondary Firebase app 上で実行する。
+ * プロフィールは primary（admin セッションのまま）の Firestore に書き込む
+ * ので、Firestore ルールの「users 書込は admin」とも整合する。
  */
 export async function createUser(id, password, profile) {
   const email = idToEmail(id);
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  await saveProfile(cred.user.uid, {
-    userId: String(id).trim().toLowerCase(),
-    ...profile,
-    createdAt: serverTimestamp(),
-    mustChangePassword: true,
-  });
-  return { uid: cred.user.uid, email };
+  const { initializeApp, deleteApp } =
+    await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+  const { getAuth: getSecondaryAuth, createUserWithEmailAndPassword: createOnSecondary,
+          signOut: signOutSecondary } =
+    await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+  const { firebaseConfig } = await import('./firebase.js');
+
+  const secondary = initializeApp(firebaseConfig, 'user-creator-' + Date.now());
+  try {
+    const secAuth = getSecondaryAuth(secondary);
+    const cred = await createOnSecondary(secAuth, email, password);
+    // プロフィールは admin セッション（primary db）で書く
+    await saveProfile(cred.user.uid, {
+      userId: String(id).trim().toLowerCase(),
+      ...profile,
+      createdAt: serverTimestamp(),
+      mustChangePassword: true,
+    });
+    await signOutSecondary(secAuth);
+    return { uid: cred.user.uid, email };
+  } finally {
+    try { await deleteApp(secondary); } catch { /* noop */ }
+  }
 }
 
 export async function changePassword(newPassword) {

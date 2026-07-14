@@ -46,7 +46,7 @@ function PlaceholderPage({ id, label }) {
       <div class="icon">🚧</div>
       <div class="title">${label}</div>
       <div class="desc">
-        この画面は順次実装中です。<br>
+        この画面は順次実装中です。<br/>
         (page id: <code class="mono">${id}</code>)
       </div>
     </div>
@@ -170,7 +170,7 @@ function LoginScreen() {
             marginTop: 10, fontSize: 10, color: 'var(--text-4)',
             letterSpacing: '0.02em', lineHeight: 1.5,
           }}>
-            Firebase 未設定でもUIを確認できます。<br>
+            Firebase 未設定でもUIを確認できます。<br/>
             本番利用は Firebase Console でユーザー作成後にログインしてください。
           </div>
         </div>
@@ -262,10 +262,10 @@ function ErrorScreen({ error }) {
           ${error?.message || String(error)}
         </div>
         <div style="margin-top: 16px; font-size: 12px; color: var(--text-3); line-height: 1.7">
-          確認事項:<br>
-          ・Firebase Console で Authentication (Email/Password) を有効化<br>
-          ・Firestore Database を作成<br>
-          ・ルールを <code>auth != null</code> で貼付<br>
+          確認事項:<br/>
+          ・Firebase Console で Authentication (Email/Password) を有効化<br/>
+          ・Firestore Database を作成<br/>
+          ・ルールを <code>auth != null</code> で貼付<br/>
           詳細は <code>firebase.js</code> のコメントを参照。
         </div>
       </div>

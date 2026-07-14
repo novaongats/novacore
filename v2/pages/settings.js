@@ -1,6 +1,11 @@
 /* ============================================================
-   NOVA Core v2 — Settings page
-   Tabs: プロフィール / ユーザー管理 / データ管理 / API設定
+   NOVA Core v2 — Settings page（設定ハブ）
+   会社の各種設定をここに集約する:
+   プロフィール / ユーザー管理 / 会社・事業 / 給与料率 / API / データ移行
+
+   保存先ポリシー:
+   - 会社共通の設定 → Firestore（settings/* や各マスタコレクション）
+   - 端末固有の設定（APIキー等）→ localStorage
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -10,6 +15,9 @@ import {
   changePassword, createUser, listUsers, saveProfile, isAdmin,
 } from '../auth.js';
 import { previewImport, runImport, listMappings } from '../importer.js';
+import { IssuerTab } from './invoices/issuer.js';
+import { RatesTab } from './payroll/rates.js';
+import { DeptsAdminSection } from './depts-admin.js';
 
 const html = htm.bind(h);
 
@@ -18,8 +26,10 @@ const html = htm.bind(h);
 const TABS = [
   { id: 'profile',  label: 'プロフィール' },
   { id: 'users',    label: 'ユーザー管理', adminOnly: true },
-  { id: 'data',     label: 'データ管理',   adminOnly: true },
+  { id: 'company',  label: '会社・事業',   adminOnly: true },
+  { id: 'rates',    label: '給与料率',     adminOnly: true },
   { id: 'api',      label: 'API設定' },
+  { id: 'data',     label: 'データ移行',   adminOnly: true },
 ];
 
 // ---- Main page -------------------------------------------------------------
@@ -29,7 +39,7 @@ export function SettingsPage({ user }) {
   const [tab, setTab] = useState(availableTabs[0]?.id || 'profile');
 
   return html`
-    <div style=${{ maxWidth: 900 }}>
+    <div style=${{ maxWidth: 960 }}>
       <div class="tabbar">
         ${availableTabs.map(t => html`
           <button key=${t.id}
@@ -43,6 +53,13 @@ export function SettingsPage({ user }) {
       <div style=${{ marginTop: 20 }}>
         ${tab === 'profile' && html`<${ProfileTab} user=${user} />`}
         ${tab === 'users'   && html`<${UsersTab}   user=${user} />`}
+        ${tab === 'company' && html`<${CompanyTab} />`}
+        ${tab === 'rates'   && html`
+          <div class="note note-info">
+            給与計算の社会保険・雇用保険料率です（給与計算ページの「料率設定」タブと同じもの）。
+          </div>
+          <${RatesTab} />
+        `}
         ${tab === 'data'    && html`<${DataTab}    user=${user} />`}
         ${tab === 'api'     && html`<${ApiTab} />`}
       </div>
@@ -157,6 +174,19 @@ function ProfileTab({ user }) {
   `;
 }
 
+// ---- Company tab (発行者情報 + 事業マスタ) ----------------------------------
+
+function CompanyTab() {
+  return html`
+    <div class="note note-info">
+      会社情報（請求書・領収書の発行元として使用）と、事業（部門）マスタの管理です。
+    </div>
+    <${IssuerTab} />
+    <div style=${{ marginTop: 20 }}></div>
+    <${DeptsAdminSection} />
+  `;
+}
+
 // ---- Users tab (admin only) ------------------------------------------------
 
 function UsersTab({ user }) {
@@ -238,11 +268,7 @@ function NewUserModal({ onClose }) {
         color: '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0'),
         pages: level === 'admin' ? ['*'] : ['home', 'sales'],
       });
-      alert(
-        `ユーザー「${name}」を作成しました。\n\n` +
-        '⚠ 注意: 作成により現在このユーザーでログイン状態になりました。\n' +
-        '一度ログアウトして管理者アカウントに戻ってください。'
-      );
+      alert(`ユーザー「${name}」を作成しました。\nあなたのログインはそのまま維持されています。`);
       onClose();
     } catch (e) {
       const code = e?.code || '';
@@ -266,10 +292,6 @@ function NewUserModal({ onClose }) {
         maxWidth: 440, width: '100%', boxShadow: 'var(--shadow-lg)',
       }}>
         <h3 style=${{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>新規ユーザー作成</h3>
-        <div class="note note-warn">
-          作成するとあなたのログインが新規ユーザーに切り替わります。<br>
-          作成後は一度ログアウトしてください。
-        </div>
         ${err && html`<div class="note note-err">${err}</div>`}
         <div class="field">
           <label>ユーザーID *</label>
@@ -373,7 +395,7 @@ function DataTab() {
       <h3>📥 レガシーデータインポート</h3>
       <div class="note note-info">
         v1 の <code>index.html</code> から <code>tools/export-legacy.html</code> で書き出した
-        JSON ファイル（<code>novacore-main-YYYY-MM-DD.json</code>）を選択してください。<br>
+        JSON ファイル（<code>novacore-main-YYYY-MM-DD.json</code>）を選択してください。<br/>
         既存のドキュメントはマージされます（上書きではなく差分更新）。
       </div>
       ${err && html`<div class="note note-err">${err}</div>`}
@@ -507,7 +529,7 @@ function ApiTab() {
       <h3>🔑 Claude API キー</h3>
       <div class="note note-warn">
         <strong>端末ローカルのみに保存されます。</strong>
-        Firestore へは同期されません（v1のセキュリティ問題を修正）。<br>
+        Firestore へは同期されません（v1のセキュリティ問題を修正）。<br/>
         他の端末でも使うには、それぞれの端末で再入力が必要です。
       </div>
 

@@ -313,7 +313,7 @@ export function EditorTab({ docId, onDone }) {
               padding: 12, background: 'var(--bg-alt)', borderRadius: 8,
               fontSize: 12, fontFamily: 'var(--font-mono)',
             }}>
-              ${form.bankName} / ${form.bankBranch}<br>
+              ${form.bankName} / ${form.bankBranch}<br/>
               ${form.bankAccountType} ${form.bankAccountNumber} / ${form.bankAccountHolder}
               ${form.bankAccountHolderKana && ` (${form.bankAccountHolderKana})`}
             </div>

@@ -117,7 +117,7 @@ export function AssessmentTab() {
       </div>
 
       <div class="note note-info">
-        ${year}年 4月・5月・6月の月次給与（総支給）平均から標準報酬月額を算定します。<br>
+        ${year}年 4月・5月・6月の月次給与（総支給）平均から標準報酬月額を算定します。<br/>
         日本年金機構への提出期限は毎年 <strong>7月10日</strong>。新しい等級は9月から適用されます。
       </div>
 
@@ -130,8 +130,8 @@ export function AssessmentTab() {
               <tr style=${{ background: 'var(--bg-alt)' }}>
                 <th style=${th} rowspan="2">氏名</th>
                 <th style=${{ ...th, textAlign: 'center' }} colspan="4">4〜6月 月次給与</th>
-                <th style=${{ ...th, textAlign: 'right' }} rowspan="2">現標準報酬<br>(等級)</th>
-                <th style=${{ ...th, textAlign: 'right' }} rowspan="2">新標準報酬<br>(等級)</th>
+                <th style=${{ ...th, textAlign: 'right' }} rowspan="2">現標準報酬<br/>(等級)</th>
+                <th style=${{ ...th, textAlign: 'right' }} rowspan="2">新標準報酬<br/>(等級)</th>
                 <th style=${th} rowspan="2">変動</th>
                 <th rowspan="2"></th>
               </tr>
