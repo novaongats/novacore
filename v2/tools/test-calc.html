@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>NOVA Core v2 — 給与計算エンジン自動テスト</title>
+<style>
+  body { font-family: 'Segoe UI', 'Noto Sans JP', sans-serif; background: #0f172a; color: #e2e8f0;
+         padding: 24px; font-size: 14px; }
+  h1 { font-size: 18px; }
+  .case { padding: 6px 10px; border-left: 3px solid #334155; margin: 3px 0;
+          font-family: Consolas, monospace; font-size: 12.5px; }
+  .pass { border-color: #10b981; color: #a7f3d0; }
+  .fail { border-color: #ef4444; color: #fecaca; background: rgba(239,68,68,.08); }
+  .summary { margin-top: 18px; padding: 14px; border-radius: 8px; font-weight: 700; }
+  .ok  { background: #064e3b; }
+  .bad { background: #7f1d1d; }
+</style>
+</head>
+<body>
+<h1>給与計算エンジン 自動テスト（ゴールデンテスト）</h1>
+<p>calc.js / tax-table.js をブラウザ内で直接検証します。Firebase接続は不要です。</p>
+<div id="out"></div>
+
+<script type="module">
+import {
+  calcMonthlyPaycheck, calcBonusPaycheck, getRatesFor,
+  getHealthStandard, snapToStandard, roundShakai,
+  splitCommuteAllowance, getInsuranceStatus,
+  calcHealthPremium, calcPensionPremium, calcChildSupportPremium,
+} from '../pages/payroll/calc.js';
+import { calcIncomeTaxForMonth, getBonusTaxRateForMonth } from '../pages/payroll/tax-table.js';
+
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+
+function eq(label, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  ok ? pass++ : fail++;
+  const div = document.createElement('div');
+  div.className = 'case ' + (ok ? 'pass' : 'fail');
+  div.textContent = `${ok ? '✓' : '✗'} ${label} → ${JSON.stringify(actual)}` +
+    (ok ? '' : `（期待値: ${JSON.stringify(expected)}）`);
+  out.appendChild(div);
+}
+function section(title) {
+  const h = document.createElement('h3');
+  h.textContent = title;
+  out.appendChild(h);
+}
+
+// ============ 1. 源泉所得税（令和6年表 = 〜2025-12） ============
+section('1. 源泉所得税: 令和6年 月額表（〜2025年12月）');
+eq('課税対象 87,999円 扶養0', calcIncomeTaxForMonth(87999, 0, '2025-06'), 0);
+// 旧NOVACore互換: 境界値ちょうどは下のブラケットに入る（<=判定）
+eq('課税対象 88,000円 扶養0（旧版互換の境界仕様）', calcIncomeTaxForMonth(88000, 0, '2025-06'), 0);
+eq('課税対象 88,001円 扶養0', calcIncomeTaxForMonth(88001, 0, '2025-06'), 130);
+eq('課税対象 167,000円 扶養0', calcIncomeTaxForMonth(167000, 0, '2025-06'), 2290);
+eq('課税対象 167,000円 扶養1', calcIncomeTaxForMonth(167000, 1, '2025-06'), 400);
+eq('課税対象 300,000円 扶養0', calcIncomeTaxForMonth(300000, 0, '2025-06'), 8920);
+eq('課税対象 2,000,001円 扶養0（200万超の算式）',
+   calcIncomeTaxForMonth(2000001, 0, '2025-06'), Math.floor(1 * 0.2303) + 178090);
+eq('扶養8人（7人の額 −1,610円）',
+   calcIncomeTaxForMonth(400000, 8, '2025-06'), 830 - 1610 < 0 ? 0 : 830 - 1610);
+
+// ============ 2. 源泉所得税（令和8年 電算機特例 = 2026-01〜） ============
+section('2. 源泉所得税: 令和8年 電算機計算の特例（2026年1月〜）');
+// 国税庁PDFの計算例1: 社保控除後 175,000円・扶養2人 → 210円
+eq('【国税庁例】175,000円 扶養2', calcIncomeTaxForMonth(175000, 2, '2026-07'), 210);
+// 350,000円 扶養0: 給与所得控除106,667 基礎控除48,334 → B=194,999 → ×10.21%−8,296 → 11,610
+eq('350,000円 扶養0', calcIncomeTaxForMonth(350000, 0, '2026-07'), 11610);
+// 非課税ライン
+eq('100,000円 扶養0（課税所得0）', calcIncomeTaxForMonth(100000, 0, '2026-07'), 0);
+// 2025-12までは旧表、2026-01からは新方式に切り替わること
+eq('年次切替: 2025-12は旧表', calcIncomeTaxForMonth(350000, 0, '2025-12'), 11490);
+eq('年次切替: 2026-01は新方式', calcIncomeTaxForMonth(350000, 0, '2026-01'), 11610);
+
+// ============ 3. 社会保険料 ============
+section('3. 社会保険料（標準報酬30万円・東京・令和8年度料率）');
+eq('健康保険 (9.85%折半)', calcHealthPremium(300000, 9.85), 14775);
+eq('厚生年金 (18.3%折半)', calcPensionPremium(300000, 18.3), 27450);
+eq('厚生年金の上限 (標報100万→65万でキャップ)', calcPensionPremium(1000000, 18.3), Math.round(650000 * 0.183 / 2));
+eq('子育て支援金 (0.23%折半)', calcChildSupportPremium(300000, 0.23), 345);
+eq('端数処理: 50銭ちょうどは切捨て', roundShakai(14970.5), 14970);
+eq('端数処理: 50銭超は切上げ', roundShakai(14970.51), 14971);
+
+// ============ 4. 標準報酬月額 ============
+section('4. 標準報酬月額');
+eq('月給30万円 → 30万円(22級)', getHealthStandard(300000), 300000);
+eq('月給29.5万円 → 30万円', getHealthStandard(295000), 300000);
+eq('逆算スナップ: 厚年27,450円×200÷18.3 → 30万円', snapToStandard(Math.round(27450 * 200 / 18.3)), 300000);
+
+// ============ 5. 通勤手当 ============
+section('5. 通勤手当の非課税分離');
+eq('公共交通 2万円 → 全額非課税', splitCommuteAllowance(20000, true).nonTaxable, 20000);
+eq('公共交通 20万円 → 15万円まで非課税', splitCommuteAllowance(200000, true).nonTaxable, 150000);
+eq('マイカー 5万円 → 31,600円まで非課税', splitCommuteAllowance(50000, false).nonTaxable, 31600);
+
+// ============ 6. 年齢による保険切替 ============
+section('6. 年齢による保険切替（2026-07時点）');
+const mkEmp = (birth) => ({ type: 'regular', birthDate: birth, careEligible: false });
+eq('45歳 → 介護保険 自動適用', getInsuranceStatus(mkEmp('1981-01-01'), '2026-07').care, true);
+eq('30歳 → 介護保険なし', getInsuranceStatus(mkEmp('1996-01-01'), '2026-07').care, false);
+eq('70歳 → 厚生年金 喪失', getInsuranceStatus(mkEmp('1956-01-01'), '2026-07').pension, false);
+eq('76歳 → 健康保険 喪失', getInsuranceStatus(mkEmp('1950-01-01'), '2026-07').health, false);
+eq('生年月日なし → careEligible を尊重',
+   getInsuranceStatus({ type: 'regular', careEligible: true }, '2026-07').care, true);
+
+// ============ 7. 料率履歴の解決 ============
+section('7. 料率履歴の解決 (getRatesFor)');
+const hist = [
+  { effectiveDate: '2026-03', health: { tokyo: 9.85 }, employmentEmployee: 0.55 },
+  { effectiveDate: '2026-04', health: { tokyo: 9.85 }, employmentEmployee: 0.50 },
+];
+eq('2026-03 → 3月分レコード', getRatesFor('2026-03', hist).employmentEmployee, 0.55);
+eq('2026-07 → 4月分レコード', getRatesFor('2026-07', hist).employmentEmployee, 0.50);
+eq('2026-01 → 履歴なし・legacyへフォールバック',
+   getRatesFor('2026-01', hist, { employmentEmployee: 0.6 }).employmentEmployee, 0.6);
+eq('履歴なし・legacyなし → 既定値', getRatesFor('2026-01', []).pension, 18.3);
+
+// ============ 8. 月次給与 end-to-end ============
+section('8. 月次給与 end-to-end（正社員・東京・月給30万・扶養0・2026-07）');
+const emp1 = { type: 'regular', prefecture: 'tokyo', monthlySalary: 300000,
+               dependents: 0, residentTax: 10000, stdRemuneration: 0 };
+const rates8 = getRatesFor('2026-07', [
+  { effectiveDate: '2026-04', health: { tokyo: 9.85 }, care: 1.62, pension: 18.3,
+    employmentEmployee: 0.50, childSupport: 0.23 },
+]);
+const c1 = calcMonthlyPaycheck(emp1, { month: '2026-07', rates: rates8 });
+eq('総支給', c1.gross, 300000);
+eq('健康保険', c1.health, 14775);
+eq('厚生年金', c1.pension, 27450);
+eq('介護保険（対象外）', c1.care, 0);
+eq('子育て支援金', c1.childSupport, 345);
+eq('雇用保険 (0.5%)', c1.employment, 1500);
+eq('社保合計', c1.social, 44070);
+eq('課税対象額', c1.taxable, 255930);
+eq('所得税', c1.incomeTax, 6340);
+eq('差引支給額', c1.net, 300000 - 44070 - 6340 - 10000);
+
+// 支援金の開始月ガード
+const c2 = calcMonthlyPaycheck(emp1, { month: '2026-03', rates: rates8 });
+eq('2026-03 は支援金0円', c2.childSupport, 0);
+
+// 産休・育休免除
+const c3 = calcMonthlyPaycheck({ ...emp1, onChildcareLeave: true }, { month: '2026-07', rates: rates8 });
+eq('育休中: 健保・厚年・支援金が0円', c3.health + c3.pension + c3.childSupport, 0);
+
+// 通勤手当（非課税）込み
+const emp2 = { ...emp1, commuteAllowanceMonthly: 15000, residentTax: 0 };
+const c4 = calcMonthlyPaycheck(emp2, { month: '2026-07', rates: rates8 });
+eq('通勤手当込みの総支給', c4.gross, 315000);
+eq('課税対象から非課税通勤手当を除外',
+   c4.taxable, c4.gross - 15000 - c4.social);
+
+// ============ 9. 賞与 end-to-end ============
+section('9. 賞与 end-to-end（2026-07・前月社保控除後255,930円・扶養0）');
+eq('賞与税率 (前月255,930円→4.084%)', getBonusTaxRateForMonth(255930, 0, '2026-07'), 0.04084);
+eq('賞与税率 (前月260,000円→6.126%)', getBonusTaxRateForMonth(260000, 0, '2026-07'), 0.06126);
+eq('賞与税率 扶養3 (前月299,999円→2.042%)', getBonusTaxRateForMonth(299999, 3, '2026-07'), 0.02042);
+eq('賞与税率 扶養3 (前月300,000円→4.084%・以上判定)', getBonusTaxRateForMonth(300000, 3, '2026-07'), 0.04084);
+const b1 = calcBonusPaycheck(emp1, {
+  month: '2026-07', amount: 500000, prevMonthAfterSocial: 255930, rates: rates8,
+});
+eq('賞与: 健康保険', b1.health, 24625);
+eq('賞与: 厚生年金', b1.pension, 45750);
+eq('賞与: 支援金', b1.childSupport, 575);
+eq('賞与: 雇用保険', b1.employment, 2500);
+eq('賞与: 所得税', b1.incomeTax, Math.floor((500000 - 73450) * 0.04084));
+eq('賞与: 1000円未満切捨て (500,999円→標準賞与50万)',
+   calcBonusPaycheck(emp1, { month: '2026-07', amount: 500999, prevMonthAfterSocial: 255930, rates: rates8 }).health,
+   24625);
+
+// ============ 結果 ============
+const sum = document.createElement('div');
+sum.className = 'summary ' + (fail === 0 ? 'ok' : 'bad');
+sum.textContent = fail === 0
+  ? `✅ 全 ${pass} 件パス`
+  : `❌ ${fail} 件失敗 / ${pass} 件パス`;
+out.appendChild(sum);
+document.title = (fail === 0 ? '✅ ' : '❌ ') + document.title;
+</script>
+</body>
+</html>

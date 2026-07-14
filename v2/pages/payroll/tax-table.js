@@ -318,10 +318,11 @@ function bonusRateR8(prevAfterSocial, dependents) {
   const dep = Math.min(Math.max(Math.floor(Number(dependents) || 0), 0), 7);
   let rate = 0;
   for (const row of BONUS_R8) {
-    if (prev >= row.t[dep] * 1000) rate = row.r / 100;
+    if (prev >= row.t[dep] * 1000) rate = row.r;
     else break;
   }
-  return rate;
+  // 浮動小数点誤差を除去（% → 小数、例 4.084% → 0.04084）
+  return Math.round(rate * 1000) / 100000;
 }
 
 // ============================================================

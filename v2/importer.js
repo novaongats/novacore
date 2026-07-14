@@ -14,6 +14,7 @@
 import { repos } from './store.js';
 import { writeBatch, doc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { db } from './firebase.js';
+import { snapToStandard } from './pages/payroll/calc.js';
 
 // Firestore batch limit
 const BATCH_SIZE = 400;
@@ -273,53 +274,128 @@ const MAP = {
 
   // --- Payroll --------------------------------------------------------------
 
+  // 旧従業員マスタは「チェックボックス + 社保固定額」方式。v2 は
+  // 「標準報酬月額 × 料率」方式のため、次の正規化を行う:
+  //   - standardRemuneration をそのまま採用。無ければ厚生年金の固定額から
+  //     逆算（本人負担 × 2 ÷ 18.3% → 等級表にスナップ。都道府県非依存で最も安全）
+  //   - careCheck → careEligible / _archived → archived / parttime → parttime-full
+  //   - 旧固定額は legacyAmounts に保持（移行後の突き合わせ確認用）
   payroll_v2_employees: {
     repo: 'payrollEmployees',
     priority: 10,
-    transform: (items) => arr(items).map(e => ({
-      ...e,
-      id: nonEmptyId(e.id, genId('emp_')),
-    })),
+    transform: (items) => arr(items).map(e => {
+      const pensionAmt = toNum(e.pensionAmount);
+      const std = toNum(e.standardRemuneration)
+        || (pensionAmt > 0 ? snapToStandard(Math.round(pensionAmt * 200 / 18.3)) : 0);
+      const type = e.type === 'parttime' ? 'parttime-full' : (e.type || 'regular');
+      const out = {
+        ...e,
+        type,
+        stdRemuneration: std,
+        careEligible: !!(e.careEligible ?? e.careCheck),
+        archived: !!(e.archived ?? e._archived),
+        dependents: toNum(e.dependents),
+        residentTax: toNum(e.residentTax),
+        monthlySalary: toNum(e.monthlySalary),
+        hourlyWage: toNum(e.hourlyWage),
+        baseHours: toNum(e.baseHours),
+        commuteAllowanceMonthly: toNum(e.commuteAllowanceMonthly),
+        commuteIsPublicTransport: e.commuteIsPublicTransport !== false,
+        legacyAmounts: {
+          health: toNum(e.healthAmount),
+          pension: pensionAmt,
+          care: toNum(e.careAmount),
+          childSupport: toNum(e.childSupportAmount),
+          healthCheck: !!e.healthCheck,
+          pensionCheck: !!e.pensionCheck,
+          employmentCheck: !!e.employmentCheck,
+        },
+        id: nonEmptyId(e.id, genId('emp_')),
+      };
+      delete out.healthCheck; delete out.pensionCheck; delete out.careCheck;
+      delete out.employmentCheck; delete out.healthAmount; delete out.pensionAmount;
+      delete out.careAmount; delete out.childSupportAmount;
+      delete out.standardRemuneration; delete out._archived; delete out.salary;
+      return out;
+    }),
   },
 
+  // 旧レコードは grossSalary/netSalary、v2 は gross/net/social。
   payroll_v2_records: {
     repo: 'payrollRecords',
     priority: 50,
     transform: (items) => arr(items)
       .filter(r => r && (r.month || r.yearMonth) && r.empId)
-      .map(r => ({
-        ...r,
-        month: r.month || r.yearMonth,
-        id: `${r.month || r.yearMonth}_${r.empId}`,
-      })),
+      .map(r => {
+        const month = r.month || r.yearMonth;
+        const health = toNum(r.health), pension = toNum(r.pension),
+              care = toNum(r.care), childSupport = toNum(r.childSupport),
+              employment = toNum(r.employment);
+        const out = {
+          ...r,
+          month,
+          gross: toNum(r.gross ?? r.grossSalary),
+          net:   toNum(r.net ?? r.netSalary),
+          social: toNum(r.social) || (health + pension + care + childSupport + employment),
+          taxable: toNum(r.taxable ?? r.taxableGross) || null,
+          childSupport,
+          id: `${month}_${r.empId}`,
+        };
+        delete out.grossSalary; delete out.netSalary; delete out.taxableGross;
+        return out;
+      }),
   },
 
+  // 旧賞与は bonusAmt/netAmount、v2 は amount/net/social。
   payroll_v2_bonus: {
     repo: 'payrollBonus',
     priority: 50,
     transform: (items) => arr(items)
       .filter(r => r && (r.month || r.yearMonth) && r.empId)
-      .map(r => ({
-        ...r,
-        month: r.month || r.yearMonth,
-        id: `${r.month || r.yearMonth}_${r.empId}`,
-      })),
+      .map(r => {
+        const month = r.month || r.yearMonth;
+        const health = toNum(r.health), pension = toNum(r.pension),
+              care = toNum(r.care), childSupport = toNum(r.childSupport),
+              employment = toNum(r.employment);
+        const out = {
+          ...r,
+          month,
+          amount: toNum(r.amount ?? r.bonusAmt),
+          net:    toNum(r.net ?? r.netAmount),
+          social: toNum(r.social) || (health + pension + care + childSupport + employment),
+          childSupport,
+          id: `${month}_${r.empId}`,
+        };
+        delete out.bonusAmt; delete out.netAmount;
+        return out;
+      }),
   },
 
+  // 旧料率履歴: [{effectiveDate:'YYYY-MM', employmentEmployee, employmentCompany}]
+  // → v2 payrollRates スキーマ（doc id = effectiveDate）へ正規化。
   payroll_v2_rates: {
     repo: 'payrollRates',
     priority: 10,
-    transform: (items) => arr(items).map((r, i) => {
-      const y = Math.floor(toNum(r.year));
-      const m = Math.floor(toNum(r.month));
-      const hasYM = y > 0 && m >= 1 && m <= 12;
-      return {
-        ...r,
-        id: hasYM
-          ? `${y}-${String(m).padStart(2, '0')}`
-          : 'rate_' + i,
-      };
-    }),
+    transform: (items) => arr(items)
+      .map((r, i) => {
+        // effectiveDate 形式（旧版標準）と year/month 形式の両対応
+        let eff = String(r.effectiveDate || '').trim();
+        if (!/^\d{4}-\d{2}$/.test(eff)) {
+          const y = Math.floor(toNum(r.year));
+          const m = Math.floor(toNum(r.month));
+          eff = (y > 0 && m >= 1 && m <= 12) ? `${y}-${String(m).padStart(2, '0')}` : '';
+        }
+        if (!eff) return null;
+        return {
+          effectiveDate: eff,
+          employmentEmployee: toNum(r.employmentEmployee),
+          employmentEmployer: toNum(r.employmentEmployer ?? r.employmentCompany),
+          note: '旧NOVACoreから移行',
+          source: 'import',
+          id: eff,
+        };
+      })
+      .filter(Boolean),
   },
 
   payroll_v2_health_rates: {

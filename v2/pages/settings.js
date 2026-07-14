@@ -328,6 +328,31 @@ function DataTab() {
     }
   }
 
+  // 同一オリジンで旧版を使っていた端末なら、localStorage から直接読み込める
+  function loadFromLocalStorage() {
+    setErr(null); setPreview(null); setResult(null); setProgress(null);
+    try {
+      const data = {};
+      let found = 0;
+      for (const m of listMappings()) {
+        const rawVal = localStorage.getItem(m.legacyKey);
+        if (rawVal == null) continue;
+        try { data[m.legacyKey] = JSON.parse(rawVal); found++; }
+        catch { /* 非JSONキーはスキップ */ }
+      }
+      if (found === 0) {
+        setErr('この端末の localStorage に旧NOVACoreのデータが見つかりませんでした。' +
+               '旧版を開いていたブラウザ・同じドメインで実行するか、エクスポートJSONを使ってください。');
+        return;
+      }
+      const pv = previewImport(data);
+      setRaw(data);
+      setPreview(pv);
+    } catch (e) {
+      setErr('読込に失敗: ' + (e.message || e));
+    }
+  }
+
   async function doImport() {
     if (!raw) return;
     if (!confirm('Firestoreへインポートを開始します。同じIDのドキュメントは上書き（merge）されます。よろしいですか？')) return;
@@ -353,8 +378,13 @@ function DataTab() {
       </div>
       ${err && html`<div class="note note-err">${err}</div>`}
 
-      <input type="file" accept=".json" onChange=${e => handleFile(e.target.files[0])}
-             style=${{ marginBottom: 16 }} />
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input type="file" accept=".json" onChange=${e => handleFile(e.target.files[0])} />
+        <span style=${{ color: 'var(--text-3)', fontSize: 12 }}>または</span>
+        <button class="btn btn-ghost" onClick=${loadFromLocalStorage}>
+          💾 この端末の旧版データを直接読み込む
+        </button>
+      </div>
 
       ${preview && html`
         <h4 style=${{ fontSize: 13, fontWeight: 700, margin: '16px 0 8px' }}>
@@ -411,6 +441,18 @@ function DataTab() {
               ${result.errors.slice(0, 5).map((e, i) => html`<li key=${i}>${e.key}: ${e.reason}</li>`)}
             </ul>
           `}
+        </div>
+
+        <div class="note note-warn" style=${{ marginTop: 12 }}>
+          <strong>📋 移行後チェックリスト（必ず確認してください）</strong>
+          <ol style=${{ marginTop: 8, paddingLeft: 20, lineHeight: 2 }}>
+            <li><strong>料率プリセットの適用</strong>: 給与計算 → 料率設定 →「最新プリセットを適用」を実行（令和8年度の健保・介護・雇保・支援金）</li>
+            <li><strong>従業員マスタの扶養人数</strong>: 旧マスタの値がそのまま移行されます。要確認（亨・可子・広浜は扶養0への修正が保留中）</li>
+            <li><strong>住民税の月額</strong>: 令和8年度の月別額を確認（志賀 ¥26,500・壁谷 ¥38,100 が2026年7月分から）</li>
+            <li><strong>標準報酬月額</strong>: 旧マスタに登録が無い従業員は厚生年金額から逆算しています。従業員マスタで各人の等級を確認</li>
+            <li><strong>介護保険料</strong>: 旧版は料率1.82%（古い値）を想定していました。v2は公表値（令和8年度 1.62%）で計算するため、金額が変わったら税理士に確認</li>
+            <li><strong>過去の給与一覧</strong>: 給与一覧タブで過去月の総支給・差引が ¥0 でなく正しく表示されるか確認</li>
+          </ol>
         </div>
       `}
     </div>
