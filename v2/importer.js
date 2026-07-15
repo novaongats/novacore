@@ -19,6 +19,62 @@ import { snapToStandard } from './pages/payroll/calc.js';
 // Firestore batch limit
 const BATCH_SIZE = 400;
 
+// ---- クラウド読込（v1 novaSync の RTDB ミラー） -----------------------------
+// v1 は保存のたびに localStorage の JSON 文字列を RTDB `novacore/{fbKey}` へ
+// ミラーしている（v1 index.html の novaSync.KEYS と同じ対応表）。
+// これを読めば、旧版を使っていたブラウザでなくても移行できる。
+// 注意: ミラーの鮮度は「最後に同期が成功した時点」。移行前にプレビューの
+// 件数・最新日付を旧版の画面と突き合わせること。
+
+export const CLOUD_DB_URL =
+  'https://novacore-65fb5-default-rtdb.asia-southeast1.firebasedatabase.app';
+
+const CLOUD_KEYS = {
+  nova_st3_cats:             'st3_cats',
+  nova_st3_daily:            'st3_daily',
+  nova_st3_costs:            'st3_costs',
+  nova_sales:                'nova_sales',
+  'expense-tracker-data-v2': 'expense_tracker',
+  rcpt_history:              'rcpt_history',
+  rcpt_accounts:             'rcpt_accounts',
+  rcpt_depts:                'rcpt_depts',
+  invoice_history:           'invoice_history',
+  client_master:             'client_master',
+  bank_master:               'bank_master',
+  nova_docs:                 'nova_docs',
+  payroll_v2_employees:      'payroll_employees',
+  payroll_v2_records:        'payroll_records',
+  payroll_v2_bonus:          'payroll_bonus',
+  payroll_v2_rates:          'payroll_rates',
+  payroll_v2_health_rates:   'payroll_health_rates',
+  payroll_v2_bank_accounts:  'payroll_bank_accounts',
+};
+
+/**
+ * RTDB ミラーから旧版データ一式を取得し、previewImport/runImport が
+ * そのまま食べられる legacy JSON 形（localStorage キー名）で返す。
+ * @returns {Promise<{data: Object, missing: string[]}>}
+ */
+export async function fetchLegacyFromCloud(onProgress = () => {}) {
+  const data = {};
+  const missing = [];
+  const entries = Object.entries(CLOUD_KEYS);
+  let i = 0;
+  for (const [legacyKey, fbKey] of entries) {
+    onProgress({ current: ++i, total: entries.length, label: fbKey });
+    const res = await fetch(`${CLOUD_DB_URL}/novacore/${encodeURIComponent(fbKey)}.json`);
+    if (!res.ok) throw new Error(`クラウド読込に失敗 (${fbKey}: HTTP ${res.status})`);
+    let v = await res.json();
+    if (v == null) { missing.push(fbKey); continue; }
+    // novaSync は JSON.stringify した文字列を保存している
+    if (typeof v === 'string') {
+      try { v = JSON.parse(v); } catch { missing.push(fbKey); continue; }
+    }
+    data[legacyKey] = v;
+  }
+  return { data, missing };
+}
+
 // ---- Helpers ---------------------------------------------------------------
 
 function toNum(v) {

@@ -14,7 +14,7 @@ import htm from 'https://esm.sh/htm@3.1.1';
 import {
   changePassword, createUser, listUsers, saveProfile, isAdmin,
 } from '../auth.js';
-import { previewImport, runImport, listMappings } from '../importer.js';
+import { previewImport, runImport, listMappings, fetchLegacyFromCloud } from '../importer.js';
 import { IssuerTab } from './invoices/issuer.js';
 import { RatesTab } from './payroll/rates.js';
 import { DeptsAdminSection } from './depts-admin.js';
@@ -331,6 +331,33 @@ function DataTab() {
     }
   }
 
+  // 旧版が Firebase RTDB に同期しているミラーから読み込む（端末・ブラウザ不問）
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudNote, setCloudNote] = useState(null);
+  async function loadFromCloud() {
+    setErr(null); setPreview(null); setResult(null); setProgress(null); setCloudNote(null);
+    setCloudBusy(true);
+    try {
+      const { data, missing } = await fetchLegacyFromCloud((p) =>
+        setProgress({ current: p.current, total: p.total, label: 'クラウド取得: ' + p.label }));
+      if (Object.keys(data).length === 0) {
+        setErr('クラウド側（旧版の同期先）にデータが見つかりませんでした。');
+        return;
+      }
+      setPreview(previewImport(data));
+      setRaw(data);
+      setCloudNote(
+        'クラウド同期ミラーから取得しました。鮮度は「旧版が最後に同期した時点」です。' +
+        '実行前に件数・最新日付を旧版の画面と突き合わせてください。' +
+        (missing.length ? `（未同期キー: ${missing.join(', ')}）` : ''));
+    } catch (e) {
+      setErr('クラウド読込に失敗: ' + (e.message || e));
+    } finally {
+      setCloudBusy(false);
+      setProgress(null);
+    }
+  }
+
   // 同一オリジンで旧版を使っていた端末なら、localStorage から直接読み込める
   function loadFromLocalStorage() {
     setErr(null); setPreview(null); setResult(null); setProgress(null);
@@ -381,13 +408,18 @@ function DataTab() {
         v2側で修正済みのデータ（従業員の扶養人数など）は再インポート後に再修正が必要です。
       </div>
       ${err && html`<div class="note note-err">${err}</div>`}
+      ${cloudNote && html`<div class="note note-info">${cloudNote}</div>`}
 
       <div style=${{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <input type="file" accept=".json" onChange=${e => handleFile(e.target.files[0])} />
+        <button class="btn" onClick=${loadFromCloud} disabled=${cloudBusy}>
+          ${cloudBusy ? '取得中...' : '☁ クラウド同期データから読み込む（推奨）'}
+        </button>
         <span style=${{ color: 'var(--text-3)', fontSize: 12 }}>または</span>
         <button class="btn btn-ghost" onClick=${loadFromLocalStorage}>
           💾 この端末の旧版データを直接読み込む
         </button>
+        <span style=${{ color: 'var(--text-3)', fontSize: 12 }}>または</span>
+        <input type="file" accept=".json" onChange=${e => handleFile(e.target.files[0])} />
       </div>
 
       ${preview && html`

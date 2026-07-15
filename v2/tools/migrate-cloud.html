@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOVA Core v2 — クラウド同期データ移行ツール</title>
+<style>
+  body { font-family: 'Noto Sans JP', sans-serif; background: #f4f6fa; color: #1e293b;
+         max-width: 860px; margin: 0 auto; padding: 32px 20px; font-size: 14px; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 28px; }
+  .note { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
+          padding: 12px 16px; font-size: 12.5px; line-height: 1.7; }
+  .warn { background: #fef2f2; border-color: #fecaca; }
+  .ok   { background: #f0fdf4; border-color: #bbf7d0; }
+  button { background: #6366f1; color: #fff; border: none; border-radius: 10px;
+           padding: 12px 22px; font-size: 14px; font-weight: 700; cursor: pointer;
+           font-family: inherit; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 10px 0; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }
+  th { background: #f8fafc; } td.num { text-align: right; font-family: monospace; }
+  #log { font-family: monospace; font-size: 12px; white-space: pre-wrap;
+         background: #0f172a; color: #a5f3fc; border-radius: 10px; padding: 14px;
+         min-height: 40px; max-height: 300px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>☁ クラウド同期データ移行ツール</h1>
+<div class="note warn">
+  <strong>これは移行作業用の開発ツールです。</strong>
+  旧NOVACoreが Firebase RTDB に同期しているミラーを取得し、
+  v2 の Firestore へ書き込みます（同じIDは丸ごと置き換え）。
+  実行前にプレビューの件数・最新日付を旧版の画面と突き合わせてください。
+</div>
+
+<h2>1. クラウドから取得してプレビュー</h2>
+<button id="btnFetch">☁ 取得してプレビュー</button>
+<div id="preview"></div>
+
+<h2>2. Firestore へ書き込み（本移行）</h2>
+<button id="btnRun" disabled>🚀 移行を実行</button>
+<div id="result"></div>
+
+<h2>ログ</h2>
+<div id="log"></div>
+
+<script type="module">
+import { fetchLegacyFromCloud, previewImport, runImport } from '../importer.js';
+
+const $ = id => document.getElementById(id);
+const log = (m) => { $('log').textContent += m + '\n'; $('log').scrollTop = 1e9; };
+
+let raw = null;
+
+$('btnFetch').onclick = async () => {
+  $('btnFetch').disabled = true;
+  $('preview').innerHTML = '';
+  try {
+    log('クラウド（RTDBミラー）から取得中...');
+    const { data, missing } = await fetchLegacyFromCloud(p => log(`  ${p.current}/${p.total} ${p.label}`));
+    raw = data;
+    const pv = previewImport(data);
+    const latestDaily = (data.nova_st3_daily || []).filter(d => !d._deleted)
+      .reduce((m, d) => d.date > m ? d.date : m, '');
+    const months = (data.payroll_v2_records || []).map(r => r.month || r.yearMonth).sort();
+    let htmlOut = '<table><tr><th>v1キー</th><th>→ v2コレクション</th><th>件数</th></tr>';
+    for (const s of pv.summary) {
+      htmlOut += `<tr><td>${s.legacyKey}</td><td>${s.repo}</td><td class="num">${s.count}</td></tr>`;
+    }
+    htmlOut += '</table>';
+    htmlOut += `<div class="note">売上入力の最新日付: <b>${latestDaily || '-'}</b> ／ ` +
+               `給与レコード期間: <b>${months[0] || '-'} 〜 ${months[months.length - 1] || '-'}</b>` +
+               (missing.length ? `<br>未同期キー: ${missing.join(', ')}` : '') + '</div>';
+    $('preview').innerHTML = htmlOut;
+    $('btnRun').disabled = false;
+    log('プレビュー完了。内容を確認して「移行を実行」を押してください。');
+  } catch (e) {
+    log('エラー: ' + (e.message || e));
+  } finally {
+    $('btnFetch').disabled = false;
+  }
+};
+
+$('btnRun').onclick = async () => {
+  if (!raw) return;
+  if (!confirm('Firestore へ書き込みます。同じIDの既存ドキュメントは丸ごと置き換えられます。よろしいですか？')) return;
+  $('btnRun').disabled = true;
+  try {
+    const res = await runImport(raw, p => {
+      if (p.label) log(`  [${p.phase}] ${p.label} (${p.current ?? ''}/${p.total ?? ''})`);
+    });
+    $('result').innerHTML =
+      `<div class="note ok"><b>完了:</b> 取込 ${res.imported} 件 / スキップ ${res.skipped} 件 / 失敗 ${res.failed} 件` +
+      (res.errors.length ? `<br>エラー: ${res.errors.map(e => e.key + ': ' + e.reason).join(' / ')}` : '') +
+      '</div>';
+    log(`移行完了: imported=${res.imported} skipped=${res.skipped} failed=${res.failed}`);
+  } catch (e) {
+    log('移行エラー: ' + (e.message || e));
+    $('result').innerHTML = `<div class="note warn">移行エラー: ${e.message || e}</div>`;
+  } finally {
+    $('btnRun').disabled = false;
+  }
+};
+</script>
+</body>
+</html>
