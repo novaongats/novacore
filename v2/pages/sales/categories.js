@@ -5,10 +5,10 @@
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
-import { useState } from 'https://esm.sh/preact@10.22.0/hooks';
+import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection } from '../../store.js';
-import { deptLabel, deptColor, uid } from '../../shared.js';
+import { deptLabel, deptColor, uid, asArray } from '../../shared.js';
 import { useDepts } from '../../depts.js';
 
 const html = htm.bind(h);
@@ -19,6 +19,12 @@ export function CategoriesTab() {
   const { data: cats, loading, error } = useCollection(repos.salesCategories);
   const [editing, setEditing] = useState(null); // null | {new}-object | existing doc
   const depts = useDepts();
+  const staff = useCollection(repos.staffMembers);
+  const staffMap = useMemo(() => {
+    const m = new Map();
+    for (const s of asArray(staff.data)) m.set(s.id, s);
+    return m;
+  }, [staff.data]);
 
   if (loading) return html`<div style=${{ color: 'var(--text-3)' }}>読込中...</div>`;
   if (error) return html`
@@ -75,7 +81,7 @@ export function CategoriesTab() {
           </div>
           <div class="card" style=${{ padding: 0, overflow: 'hidden' }}>
             ${list.map(c => html`
-              <${CategoryRow} key=${c.id} cat=${c} onEdit=${() => setEditing(c)} />
+              <${CategoryRow} key=${c.id} cat=${c} staffMap=${staffMap} onEdit=${() => setEditing(c)} />
             `)}
           </div>
         </div>
@@ -84,6 +90,7 @@ export function CategoriesTab() {
       ${editing !== null && html`
         <${CategoryModal}
           initial=${editing}
+          staffMembers=${asArray(staff.data)}
           onClose=${() => setEditing(null)}
         />
       `}
@@ -93,10 +100,12 @@ export function CategoriesTab() {
 
 // ---- Row -------------------------------------------------------------------
 
-function CategoryRow({ cat, onEdit }) {
+function CategoryRow({ cat, staffMap, onEdit }) {
   const rs = cat.revShare;
   const rsText = rs?.enabled ? `レベシェア ${rs.companyPct}%` : '';
   const inputTypeLabel = { daily: '日次入力', monthly: '月次入力', project: '案件単位' }[cat.inputType] || cat.inputType || '-';
+  // マスタに無い staffId はそのまま id を出す（不明な担当を無言で隠さない）
+  const staffName = cat.staffId ? (staffMap?.get(cat.staffId)?.name || cat.staffId) : '';
 
   return html`
     <div style=${{
@@ -112,7 +121,7 @@ function CategoryRow({ cat, onEdit }) {
         </div>
         <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
           ${inputTypeLabel}
-          ${cat.staffId && html`<span style=${{ marginLeft: 8 }}>担当: ${cat.staffId}</span>`}
+          ${staffName && html`<span style=${{ marginLeft: 8 }}>担当: ${staffName}</span>`}
           ${rsText && html`<span style=${{ marginLeft: 8, color: 'var(--primary)' }}>${rsText}</span>`}
         </div>
       </div>
@@ -123,7 +132,7 @@ function CategoryRow({ cat, onEdit }) {
 
 // ---- Edit/Create modal -----------------------------------------------------
 
-function CategoryModal({ initial, onClose }) {
+function CategoryModal({ initial, staffMembers, onClose }) {
   const isNew = !initial.id;
   const depts = useDepts();
   const [form, setForm] = useState(() => ({
@@ -142,6 +151,17 @@ function CategoryModal({ initial, onClose }) {
   const deptOptions = depts
     .filter(d => !d.archived || d.key === form.dept)
     .map(d => ({ value: d.key, label: d.label + (d.archived ? '（アーカイブ済）' : '') }));
+
+  // 担当者選択肢: アーカイブ除外。ただし編集中カテゴリの現在値（アーカイブ済み・
+  // マスタに無い id）は選択肢に残す — 開いて保存しただけで値が壊れないように。
+  const members = staffMembers || [];
+  const staffOptions = [{ value: '', label: '（担当なし）' }]
+    .concat(members
+      .filter(s => !s.archived || s.id === form.staffId)
+      .map(s => ({ value: s.id, label: s.name + (s.archived ? '（アーカイブ済）' : '') })));
+  if (form.staffId && !members.some(s => s.id === form.staffId)) {
+    staffOptions.push({ value: form.staffId, label: `（未登録: ${form.staffId}）` });
+  }
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -228,10 +248,9 @@ function CategoryModal({ initial, onClose }) {
                          ]} />
             </div>
             <div class="field">
-              <label>担当者ID（任意）</label>
-              <input type="text" value=${form.staffId}
-                     onInput=${e => set('staffId', e.target.value)} disabled=${busy}
-                     placeholder="例: shiga" />
+              <label>担当者</label>
+              <${Select} value=${form.staffId} onChange=${v => set('staffId', v)} disabled=${busy}
+                         options=${staffOptions} />
             </div>
           </div>
 

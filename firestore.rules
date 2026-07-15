@@ -67,6 +67,7 @@ service cloud.firestore {
 
     // ---- 業務データ: ログインユーザーなら読み書き可 ---------------
     match /salesDepts/{doc}       { allow read, write: if isAuthed(); }
+    match /staffMembers/{doc}     { allow read, write: if isAuthed(); }
     match /salesCategories/{doc}  { allow read, write: if isAuthed(); }
     match /salesEntries/{doc}     { allow read, write: if isAuthed(); }
     match /salesCosts/{doc}       { allow read, write: if isAuthed(); }

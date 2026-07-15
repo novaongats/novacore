@@ -2,7 +2,10 @@
    NOVA Core v2 — Payroll / Pure calculation helpers
 
    月次・賞与の給与計算エンジン。
-   - 社会保険料: 標準報酬月額 × 料率 ÷ 2（端数は50銭以下切捨て・50銭超切上げ）
+   - 社会保険料: 標準報酬月額 × 料率 ÷ 2。端数処理は roundShakai の mode で切替:
+       'floor'（既定）= 円未満切捨て（顧問税理士の計算方式。v1 最終版と同一）
+       'gojyo'        = 50銭以下切捨て・50銭超切上げ（法定の端数処理）
+     mode は料率履歴（payrollRates.shakaiRounding）→ legacy 設定 → 既定 'floor' で解決。
    - 所得税: tax-table.js（月額表/電算機特例を年次で自動切替）
    - 子ども・子育て支援金: 2026年4月〜、健保加入者対象
    - 通勤手当: 非課税限度額を自動分離（所得税法施行令20条の2、
@@ -87,44 +90,57 @@ export function snapToStandard(amount) {
 
 /**
  * 社会保険料の本人負担額の端数処理。
- * 法令: 50銭以下切り捨て、50銭超切り上げ。
+ * @param mode 'floor'（既定）: 円未満切捨て。顧問税理士（中西会計）の計算慣行に
+ *             合わせた方式。v1 最終版は Math.floor 固定（変更禁止と明記）だった
+ *             ため、税理士との並走検証を一致させるにはこちらを使う。
+ *             'gojyo': 50銭以下切捨て・50銭超切上げ（健康保険法等の法定処理）。
  */
-export function roundShakai(rawAmount) {
-  const yen = Math.floor(rawAmount);
-  return (rawAmount - yen) > 0.5 ? yen + 1 : yen;
+export function roundShakai(rawAmount, mode = 'floor') {
+  // 浮動小数点誤差の除去: 0.1銭（1/1000円）単位に丸めてから端数処理する。
+  // 例: 300000×9.85%÷2 は double では 14774.999999999998 になり、
+  //     素朴な Math.floor だと 14774 と1円ズレてしまう（真値は 14775.0）。
+  const r = Math.round(rawAmount * 1000) / 1000;
+  const yen = Math.floor(r);
+  if (mode === 'gojyo') return (r - yen) > 0.5 ? yen + 1 : yen;
+  return yen;
+}
+
+/** rates オブジェクトから端数処理モードを取り出す（不正値は 'floor'） */
+export function resolveShakaiRounding(v) {
+  return v === 'gojyo' ? 'gojyo' : 'floor';
 }
 
 // ---- Insurance premium calculations ---------------------------------------
 
 /** 健康保険料（従業員負担、折半） */
-export function calcHealthPremium(stdRemuneration, ratePercent) {
+export function calcHealthPremium(stdRemuneration, ratePercent, mode = 'floor') {
   if (!stdRemuneration || !ratePercent) return 0;
-  return roundShakai(stdRemuneration * (ratePercent / 100) / 2);
+  return roundShakai(stdRemuneration * (ratePercent / 100) / 2, mode);
 }
 
 /** 介護保険料（40〜64歳、従業員負担、折半） */
-export function calcCarePremium(stdRemuneration, ratePercent) {
+export function calcCarePremium(stdRemuneration, ratePercent, mode = 'floor') {
   if (!stdRemuneration || !ratePercent) return 0;
-  return roundShakai(stdRemuneration * (ratePercent / 100) / 2);
+  return roundShakai(stdRemuneration * (ratePercent / 100) / 2, mode);
 }
 
 /** 厚生年金保険料（従業員負担、折半） */
-export function calcPensionPremium(stdRemuneration, ratePercent = PENSION_RATE) {
+export function calcPensionPremium(stdRemuneration, ratePercent = PENSION_RATE, mode = 'floor') {
   if (!stdRemuneration) return 0;
   const capped = Math.min(stdRemuneration, PENSION_CAP);
-  return roundShakai(capped * (ratePercent / 100) / 2);
+  return roundShakai(capped * (ratePercent / 100) / 2, mode);
 }
 
 /** 雇用保険料（従業員負担、総支給額ベース） */
-export function calcEmploymentPremium(grossSalary, employeeRatePercent = DEFAULT_EMPLOYMENT_RATES.employee) {
+export function calcEmploymentPremium(grossSalary, employeeRatePercent = DEFAULT_EMPLOYMENT_RATES.employee, mode = 'floor') {
   if (!grossSalary) return 0;
-  return roundShakai(grossSalary * (employeeRatePercent / 100));
+  return roundShakai(grossSalary * (employeeRatePercent / 100), mode);
 }
 
 /** 子ども・子育て支援金（従業員負担、折半、2026年4月〜） */
-export function calcChildSupportPremium(stdRemuneration, ratePercent = DEFAULT_CHILD_SUPPORT_RATE) {
+export function calcChildSupportPremium(stdRemuneration, ratePercent = DEFAULT_CHILD_SUPPORT_RATE, mode = 'floor') {
   if (!stdRemuneration || !ratePercent) return 0;
-  return roundShakai(stdRemuneration * (ratePercent / 100) / 2);
+  return roundShakai(stdRemuneration * (ratePercent / 100) / 2, mode);
 }
 
 // ---- 料率履歴の解決 ----------------------------------------------------------
@@ -135,10 +151,14 @@ export function calcChildSupportPremium(stdRemuneration, ratePercent = DEFAULT_C
  *
  * @param month     'YYYY-MM'
  * @param ratesList payrollRates docs: [{effectiveDate, health:{pref:%}, care,
- *                  pension, employmentEmployee, employmentEmployer, childSupport}]
+ *                  pension, employmentEmployee, employmentEmployer, childSupport,
+ *                  shakaiRounding}]
  * @param legacy    旧 settings/payroll_*_rates 由来のフォールバック（省略可）
  * @returns {{health:{}, care, pension, employmentEmployee, employmentEmployer,
- *            childSupport, effectiveDate, source}}
+ *            childSupport, shakaiRounding, effectiveDate, source}}
+ *          shakaiRounding: 社会保険料の端数処理 'floor'（切捨て・税理士方式=既定）
+ *                          | 'gojyo'（50銭以下切捨て・超切上げ=法定）。
+ *                          履歴doc → legacy → 既定 'floor' の順で解決。
  *          source: 主たる解決元 'history'（料率履歴）| 'legacy'（旧settings）
  *                  | 'default'（コード内既定値）— 監査・警告表示用の追加プロパティ。
  *                  既存の分割代入とは後方互換（プロパティ追加のみ）。
@@ -152,6 +172,7 @@ export function getRatesFor(month, ratesList, legacy = {}) {
     employmentEmployee: legacy.employmentEmployee ?? DEFAULT_EMPLOYMENT_RATES.employee,
     employmentEmployer: legacy.employmentEmployer ?? DEFAULT_EMPLOYMENT_RATES.employer,
     childSupport: legacy.childSupport ?? DEFAULT_CHILD_SUPPORT_RATE,
+    shakaiRounding: legacy.shakaiRounding === 'gojyo' ? 'gojyo' : 'floor',
     effectiveDate: null,
     source: hasLegacy ? 'legacy' : 'default',
   };
@@ -174,6 +195,9 @@ export function getRatesFor(month, ratesList, legacy = {}) {
     employmentEmployee: hit.employmentEmployee ?? base.employmentEmployee,
     employmentEmployer: hit.employmentEmployer ?? base.employmentEmployer,
     childSupport: hit.childSupport ?? base.childSupport,
+    shakaiRounding: hit.shakaiRounding === 'gojyo' ? 'gojyo'
+      : hit.shakaiRounding === 'floor' ? 'floor'
+      : base.shakaiRounding,
     effectiveDate: hit.effectiveDate,
     source: 'history',
   };
@@ -390,15 +414,17 @@ export function calcMonthlyPaycheck(emp, input = {}) {
   const pensionRate = rates.pension ?? rates.pensionRate ?? PENSION_RATE;
   const empRate     = rates.employmentEmployee ?? DEFAULT_EMPLOYMENT_RATES.employee;
   const csRate      = rates.childSupport ?? DEFAULT_CHILD_SUPPORT_RATE;
+  // 社保・雇保の端数処理モード（既定 'floor' = 税理士方式の切捨て）
+  const rounding    = resolveShakaiRounding(rates.shakaiRounding);
 
   // 産休・育休中は社会保険料免除（雇用保険・税は免除されない）
-  const health  = (!onLeave && ins.health)  ? calcHealthPremium(stdHealth, healthRate) : 0;
-  const care    = (!onLeave && ins.care)    ? calcCarePremium(stdHealth, careRate) : 0;
-  const pension = (!onLeave && ins.pension) ? calcPensionPremium(stdPension, pensionRate) : 0;
+  const health  = (!onLeave && ins.health)  ? calcHealthPremium(stdHealth, healthRate, rounding) : 0;
+  const care    = (!onLeave && ins.care)    ? calcCarePremium(stdHealth, careRate, rounding) : 0;
+  const pension = (!onLeave && ins.pension) ? calcPensionPremium(stdPension, pensionRate, rounding) : 0;
   const childSupport =
     (!onLeave && ins.childSupport && month && month >= CHILD_SUPPORT_FROM)
-      ? calcChildSupportPremium(stdHealth, csRate) : 0;
-  const employment = ins.employment ? calcEmploymentPremium(gross, empRate) : 0;
+      ? calcChildSupportPremium(stdHealth, csRate, rounding) : 0;
+  const employment = ins.employment ? calcEmploymentPremium(gross, empRate, rounding) : 0;
 
   const social = health + care + pension + childSupport + employment;
 
@@ -470,14 +496,16 @@ export function calcBonusPaycheck(emp, input = {}) {
   const pensionRate = rates.pension ?? rates.pensionRate ?? PENSION_RATE;
   const empRate     = rates.employmentEmployee ?? DEFAULT_EMPLOYMENT_RATES.employee;
   const csRate      = rates.childSupport ?? DEFAULT_CHILD_SUPPORT_RATE;
+  // 社保・雇保の端数処理モード（既定 'floor' = 税理士方式の切捨て）
+  const rounding    = resolveShakaiRounding(rates.shakaiRounding);
 
-  const health  = (!onLeave && ins.health)  ? roundShakai(healthBase  * (healthRate  / 100) / 2) : 0;
-  const care    = (!onLeave && ins.care)    ? roundShakai(healthBase  * (careRate    / 100) / 2) : 0;
-  const pension = (!onLeave && ins.pension) ? roundShakai(pensionBase * (pensionRate / 100) / 2) : 0;
+  const health  = (!onLeave && ins.health)  ? roundShakai(healthBase  * (healthRate  / 100) / 2, rounding) : 0;
+  const care    = (!onLeave && ins.care)    ? roundShakai(healthBase  * (careRate    / 100) / 2, rounding) : 0;
+  const pension = (!onLeave && ins.pension) ? roundShakai(pensionBase * (pensionRate / 100) / 2, rounding) : 0;
   const childSupport =
     (!onLeave && ins.childSupport && month && month >= CHILD_SUPPORT_FROM)
-      ? roundShakai(healthBase * (csRate / 100) / 2) : 0;
-  const employment = ins.employment ? roundShakai(amount * (empRate / 100)) : 0;
+      ? roundShakai(healthBase * (csRate / 100) / 2, rounding) : 0;
+  const employment = ins.employment ? roundShakai(amount * (empRate / 100), rounding) : 0;
 
   const social = health + care + pension + childSupport + employment;
 

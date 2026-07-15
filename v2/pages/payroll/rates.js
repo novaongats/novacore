@@ -5,7 +5,8 @@
    給与計算時は getRatesFor(month) が該当月に有効な料率を解決する。
    - doc id = effectiveDate ('YYYY-MM')
    - スキーマ: { effectiveDate, health:{tokyo,...}, care, pension,
-                employmentEmployee, employmentEmployer, childSupport, note, source }
+                employmentEmployee, employmentEmployer, childSupport,
+                shakaiRounding('floor'|'gojyo'), note, source }
 
    旧 settings/payroll_*_rates（単一値）は履歴が無い月のフォールバック
    として引き続き機能する（getRatesFor 参照）。
@@ -112,6 +113,7 @@ export function RatesTab() {
                   <th style=${{ ...th, textAlign: 'right' }}>厚年</th>
                   <th style=${{ ...th, textAlign: 'right' }}>雇保(本人)</th>
                   <th style=${{ ...th, textAlign: 'right' }}>支援金</th>
+                  <th style=${{ ...th, textAlign: 'center' }}>端数</th>
                   <th style=${th}>メモ</th>
                   <th></th>
                 </tr>
@@ -140,6 +142,9 @@ export function RatesTab() {
                       <td class="num" style=${{ ...td, textAlign: 'right' }}>${r.pension != null ? r.pension + '%' : '−'}</td>
                       <td class="num" style=${{ ...td, textAlign: 'right' }}>${r.employmentEmployee != null ? r.employmentEmployee + '%' : '−'}</td>
                       <td class="num" style=${{ ...td, textAlign: 'right' }}>${r.childSupport != null ? r.childSupport + '%' : '−'}</td>
+                      <td style=${{ ...td, textAlign: 'center', fontSize: 11 }}>
+                        ${r.shakaiRounding === 'gojyo' ? '50銭' : '切捨て'}
+                      </td>
                       <td style=${{ ...td, fontSize: 11, color: 'var(--text-3)', maxWidth: 220 }}>${r.note || ''}</td>
                       <td style=${{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button class="btn btn-ghost" style=${{ padding: '4px 8px' }}
@@ -155,7 +160,9 @@ export function RatesTab() {
           </div>
           <div style=${{ marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
             ※ 料率はすべて<strong>折半前の総料率</strong>。従業員負担は半額（雇用保険を除く）。<br/>
-            ※ 子ども・子育て支援金は2026年4月分から健保加入者に適用されます（それ以前の月は自動的に0円）。
+            ※ 子ども・子育て支援金は2026年4月分から健保加入者に適用されます（それ以前の月は自動的に0円）。<br/>
+            ※ 「端数」= 社会保険料（本人負担）の端数処理。<strong>切捨て</strong>（円未満切捨て・税理士方式）が既定、
+            50銭（50銭以下切捨て・超切上げ）は法定方式。1円単位で差が出ることがあります。
           </div>
         `}
 
@@ -179,6 +186,7 @@ function RateModal({ initial, existing, onClose }) {
     employmentEmployee: initial.employmentEmployee ?? base.employmentEmployee ?? DEFAULT_EMPLOYMENT_RATES.employee,
     employmentEmployer: initial.employmentEmployer ?? base.employmentEmployer ?? DEFAULT_EMPLOYMENT_RATES.employer,
     childSupport: initial.childSupport ?? base.childSupport ?? DEFAULT_CHILD_SUPPORT_RATE,
+    shakaiRounding: initial.shakaiRounding ?? base.shakaiRounding ?? 'floor',
     note: initial.note || '',
   }));
   const [busy, setBusy] = useState(false);
@@ -210,6 +218,7 @@ function RateModal({ initial, existing, onClose }) {
         employmentEmployee: Number(form.employmentEmployee) || 0,
         employmentEmployer: Number(form.employmentEmployer) || 0,
         childSupport: Number(form.childSupport) || 0,
+        shakaiRounding: form.shakaiRounding === 'gojyo' ? 'gojyo' : 'floor',
         note: (form.note || '').trim(),
         source: 'manual',
       }, { merge: false });
@@ -269,6 +278,20 @@ function RateModal({ initial, existing, onClose }) {
                            onInput=${v => set('employmentEmployee', v)} disabled=${busy} />
               <${PctField} label="事業主負担（参考）" value=${form.employmentEmployer}
                            onInput=${v => set('employmentEmployer', v)} disabled=${busy} />
+            </div>
+          </div>
+
+          <div>
+            <div style=${groupLabel}>社会保険料の端数処理（本人負担分）</div>
+            <select value=${form.shakaiRounding}
+                    onChange=${e => set('shakaiRounding', e.target.value)}
+                    disabled=${busy} style=${{ ...inputStyle, maxWidth: 380 }}>
+              <option value="floor">切り捨て（税理士方式・推奨）</option>
+              <option value="gojyo">50銭ルール（法定: 50銭以下切捨て・超切上げ）</option>
+            </select>
+            <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
+              顧問税理士の計算方式に合わせる場合は<strong>切り捨て</strong>を選択してください。
+              健保・介護・厚年・子育て支援金・雇用保険の端数に適用されます（差は最大1円/項目）。
             </div>
           </div>
 

@@ -17,6 +17,7 @@ import { DocumentsPage } from './pages/documents/index.js';
 import { PayrollPage } from './pages/payroll/index.js';
 import { TaxReportPage } from './pages/tax/index.js';
 import { HomePage } from './pages/home.js';
+import { GuidePage } from './pages/guide.js';
 
 const html = htm.bind(h);
 
@@ -34,6 +35,7 @@ const NAV = [
   { id: 'tax',       label: '税理士提出書類', icon: '▧' },
   { group: '設定' },
   { id: 'settings',  label: '設定',         icon: '⚙' },
+  { id: 'guide',     label: '使い方ガイド', icon: '📖' },
 ];
 
 const DEFAULT_PAGE = 'home';
@@ -50,6 +52,7 @@ const PAGES = {
   docs:     DocumentsPage,
   payroll:  PayrollPage,
   tax:      TaxReportPage,
+  guide:    GuidePage,
 };
 
 // ---- Hash router -----------------------------------------------------------
@@ -188,7 +191,8 @@ function Sidebar({ route, user, onNavigate, open }) {
           if (item.group) {
             return html`<div class="sb-group" key=${'g-' + item.group}>${item.group}</div>`;
           }
-          if (!hasAccess(user, item.id) && user?.level !== 'admin') return null;
+          // 使い方ガイドは権限に関係なく全員に表示（説明書のため）
+          if (item.id !== 'guide' && !hasAccess(user, item.id) && user?.level !== 'admin') return null;
           return html`
             <button
               key=${item.id}
@@ -361,7 +365,8 @@ function AuthenticatedApp({ user }) {
   }, [user]);
 
   // Guard: if user lacks access to current route, bounce to home.
-  const allowed = hasAccess(user, route) || user.level === 'admin';
+  // （使い方ガイドは説明書のため全員アクセス可）
+  const allowed = route === 'guide' || hasAccess(user, route) || user.level === 'admin';
   useEffect(() => {
     if (!allowed && route !== DEFAULT_PAGE) navigate(DEFAULT_PAGE);
   }, [route, user]);

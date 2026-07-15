@@ -40,6 +40,8 @@ export function MonthlyTab() {
     employmentEmployer: empRatesQ.data?.employer,
     care:    otherRatesQ.data?.care,
     pension: otherRatesQ.data?.pension,
+    // 社保端数処理モード（履歴docに無い月のフォールバック。未設定は 'floor'=切捨て）
+    shakaiRounding: otherRatesQ.data?.shakaiRounding,
   }), [month, ratesHistory.data, healthRatesQ.data, empRatesQ.data, otherRatesQ.data]);
 
   const empList = asArray(employees.data).filter(e => !e.archived);

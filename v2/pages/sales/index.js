@@ -10,11 +10,13 @@ import { CategoriesTab } from './categories.js';
 import { EntriesTab } from './entries.js';
 import { CostsTab } from './costs.js';
 import { DashboardTab } from './dashboard.js';
+import { ByStaffTab } from './by-staff.js';
 
 const html = htm.bind(h);
 
 const TABS = [
   { id: 'dashboard',  label: 'ダッシュボード' },
+  { id: 'by-staff',   label: '担当者別' },
   { id: 'entries',    label: '日次売上' },
   { id: 'costs',      label: '月次コスト' },
   { id: 'categories', label: 'カテゴリ' },
@@ -36,6 +38,7 @@ export function SalesPage({ user }) {
       </div>
       <div style=${{ marginTop: 20 }}>
         ${tab === 'dashboard'  && html`<${DashboardTab} />`}
+        ${tab === 'by-staff'   && html`<${ByStaffTab} />`}
         ${tab === 'entries'    && html`<${EntriesTab} />`}
         ${tab === 'costs'      && html`<${CostsTab} />`}
         ${tab === 'categories' && html`<${CategoriesTab} />`}

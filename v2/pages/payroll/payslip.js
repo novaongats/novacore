@@ -60,8 +60,9 @@ export function PayslipOverlay({ records = [], onClose, kind = 'monthly' }) {
 }
 
 // ---- Single slip (A4 portrait, 2 slips per A4 potentially) -----------------
+// mailer.js（明細メール送付）が PDF 生成用に再利用するため export する。
 
-function Slip({ rec, issuer, kind }) {
+export function Slip({ rec, issuer, kind }) {
   const isBonus = kind === 'bonus';
   const title = isBonus ? '賞与明細書' : '給与明細書';
   const monthStr = monthLabel(rec.month || '');
@@ -138,8 +139,9 @@ function Row({ label, value, bold }) {
 }
 
 // ---- CSS (inline <style> — moved to styles.css in the future) --------------
+// mailer.js が hidden 領域での PDF キャプチャにも使うため export する。
 
-const printStyle = html`
+export const printStyle = html`
 <style>
   .payslip-overlay {
     position: fixed; inset: 0;

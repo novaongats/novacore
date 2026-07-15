@@ -111,6 +111,7 @@ export const repos = {
 
   // Sales (merged: depts master + categories + daily entries + monthly cost sheets)
   salesDepts:      createRepo('salesDepts'),
+  staffMembers:    createRepo('staffMembers'), // 担当者マスタ（v1 nova_members 由来）
   salesCategories: createRepo('salesCategories'),
   salesEntries:    createRepo('salesEntries'),
   salesCosts:      createRepo('salesCosts'),

@@ -103,6 +103,7 @@ export const RATE_PRESETS = [
     employmentEmployee: 0.55,  // 雇用保険は令和7年度料率のまま
     employmentEmployer: 0.90,
     childSupport: 0.23,
+    shakaiRounding: 'floor',   // 社保端数は切捨て（税理士方式）を既定とする
     note: '協会けんぽ令和8年度（東京9.85/神奈川9.92/愛知9.93/岐阜9.80、介護1.62）',
   },
   {
@@ -114,6 +115,7 @@ export const RATE_PRESETS = [
     employmentEmployee: 0.50,
     employmentEmployer: 0.85,
     childSupport: 0.23,
+    shakaiRounding: 'floor',   // 社保端数は切捨て（税理士方式）を既定とする
     note: '雇用保険（一般）労働者0.5%/事業主0.85%。子ども・子育て支援金0.23%開始',
   },
 ];

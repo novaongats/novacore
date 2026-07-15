@@ -30,6 +30,7 @@ export const CLOUD_DB_URL =
   'https://novacore-65fb5-default-rtdb.asia-southeast1.firebasedatabase.app';
 
 const CLOUD_KEYS = {
+  nova_members:              'nova_members',
   nova_st3_cats:             'st3_cats',
   nova_st3_daily:            'st3_daily',
   nova_st3_costs:            'st3_costs',
@@ -146,6 +147,24 @@ function unwrapLegacy(legacyJson) {
 
 const MAP = {
   // --- Sales ----------------------------------------------------------------
+
+  // Staff master (担当者マスタ). v1 の nova_members はログイン兼担当者マスタで
+  // pass / mustChangePass などの認証フィールドを含む — v2 のログインは
+  // Firebase Auth（users コレクション）なので、担当者情報のみを移す。
+  // level / pages は v2 の権限体系とは別物のため legacy* として保持のみ。
+  nova_members: {
+    repo: 'staffMembers',
+    priority: 10,
+    transform: (items) => arr(items).map(m => ({
+      name:        m.name || '',
+      role:        m.role || '',
+      color:       m.color || '#6366f1',
+      legacyLevel: m.level || '',
+      legacyPages: arr(m.pages),
+      archived:    false,
+      id: nonEmptyId(m.id, genId('stf_')),
+    })),
+  },
 
   // Tracker categories (master).
   // v1 marks soft-deleted categories with `_deleted` — skip them on import.

@@ -21,6 +21,7 @@ const html = htm.bind(h);
 export function EntriesTab() {
   const [month, setMonth] = useState(thisMonth());
   const [editing, setEditing] = useState(null); // existing entry being edited
+  const [staffFilter, setStaffFilter] = useState(''); // '' | '__none' | staffId
 
   const monthStart = month + '-01';
   const monthEnd   = dayjs(monthStart).add(1, 'month').format('YYYY-MM-DD');
@@ -48,9 +49,30 @@ export function EntriesTab() {
     return m;
   }, [cats.data]);
 
+  // 担当者マスタ（カテゴリ選択肢の「（担当者名）」表示と絞り込み用）
+  const staff = useCollection(repos.staffMembers);
+  const staffMap = useMemo(() => {
+    const m = new Map();
+    for (const s of asArray(staff.data)) m.set(s.id, s);
+    return m;
+  }, [staff.data]);
+
+  // 担当者絞り込み（カテゴリの staffId 経由で解決）
+  const filteredEntries = useMemo(() => {
+    if (!staffFilter) return entries.data;
+    return entries.data.filter(e => {
+      const sid = catMap.get(e.catId)?.staffId || '';
+      const known = sid && staffMap.has(sid);
+      if (staffFilter === '__none') return !known;
+      return sid === staffFilter;
+    });
+  }, [entries.data, staffFilter, catMap, staffMap]);
+
   return html`
     <div>
-      <${MonthBar} month=${month} onChange=${setMonth} />
+      <${MonthBar} month=${month} onChange=${setMonth}
+                  staffMembers=${asArray(staff.data)}
+                  staffFilter=${staffFilter} onStaffFilter=${setStaffFilter} />
 
       <${KpiRow} entries=${entries.data} catMap=${catMap} />
 
@@ -68,13 +90,20 @@ export function EntriesTab() {
           「カテゴリ」タブでカテゴリの部門を変更するか、設定で部門のアーカイブを解除してください。
         </div>
       ` : html`
-        <${QuickAddForm} cats=${activeCats} defaultMonth=${month} />
+        <${QuickAddForm} cats=${activeCats} staffMap=${staffMap} defaultMonth=${month} />
+      `}
+
+      ${staffFilter && html`
+        <div class="note note-info" style=${{ marginBottom: 12 }}>
+          担当者「${staffFilter === '__none' ? '担当なし' : (staffMap.get(staffFilter)?.name || staffFilter)}」で絞り込み中
+          （${filteredEntries.length}件 / 全${entries.data.length}件）。上のKPIは絞り込み前の当月合計です。
+        </div>
       `}
 
       <${EntryList}
         loading=${entries.loading}
         error=${entries.error}
-        entries=${entries.data}
+        entries=${filteredEntries}
         catMap=${catMap}
         onEdit=${setEditing}
       />
@@ -83,6 +112,7 @@ export function EntriesTab() {
         <${EntryModal}
           initial=${editing}
           cats=${cats.data}
+          staffMap=${staffMap}
           onClose=${() => setEditing(null)}
         />
       `}
@@ -92,7 +122,8 @@ export function EntriesTab() {
 
 // ---- Month bar -------------------------------------------------------------
 
-function MonthBar({ month, onChange }) {
+function MonthBar({ month, onChange, staffMembers, staffFilter, onStaffFilter }) {
+  const activeStaff = (staffMembers || []).filter(s => !s.archived || s.id === staffFilter);
   return html`
     <div style=${{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -107,6 +138,19 @@ function MonthBar({ month, onChange }) {
         <button class="btn btn-ghost" onClick=${() => onChange(thisMonth())}
                 style=${{ marginLeft: 8 }}>今月</button>
       </div>
+      ${onStaffFilter && html`
+        <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style=${{ fontSize: 12, color: 'var(--text-3)' }}>担当者</span>
+          <select value=${staffFilter} onChange=${e => onStaffFilter(e.target.value)}
+                  style=${{ ...inputStyle, width: 'auto', minWidth: 140 }}>
+            <option value="">すべて</option>
+            ${activeStaff.map(s => html`
+              <option key=${s.id} value=${s.id}>${s.name}${s.archived ? '（アーカイブ済）' : ''}</option>
+            `)}
+            <option value="__none">担当なし</option>
+          </select>
+        </div>
+      `}
     </div>
   `;
 }
@@ -189,7 +233,13 @@ function KpiCard({ label, value, accent }) {
 
 // ---- Quick-add form (inline) -----------------------------------------------
 
-function QuickAddForm({ cats, defaultMonth }) {
+// カテゴリ選択肢のラベル: 「部門 / カテゴリ名（担当者名）」（v1 と同じ併記）
+function catOptionLabel(c, staffMap) {
+  const staffName = c.staffId ? (staffMap?.get(c.staffId)?.name || '') : '';
+  return `${deptLabel(c.dept)} / ${c.name}${staffName ? `（${staffName}）` : ''}`;
+}
+
+function QuickAddForm({ cats, staffMap, defaultMonth }) {
   // Default date: today if within selected month, else 1st of month.
   const defaultDate = useMemo(() => {
     const t = today();
@@ -267,7 +317,7 @@ function QuickAddForm({ cats, defaultMonth }) {
                 style=${inputStyle}>
           ${cats.map(c => html`
             <option key=${c.id} value=${c.id}>
-              ${deptLabel(c.dept)} / ${c.name}
+              ${catOptionLabel(c, staffMap)}
             </option>
           `)}
         </select>
@@ -384,7 +434,7 @@ function EntryRow({ entry, catMap, onEdit }) {
 
 // ---- Edit modal ------------------------------------------------------------
 
-function EntryModal({ initial, cats, onClose }) {
+function EntryModal({ initial, cats, staffMap, onClose }) {
   const [date, setDate] = useState(initial.date || today());
   // catId 無しレコードは先頭カテゴリを勝手にプリセレクトしない（未分類のまま保持）
   const [catId, setCatId] = useState(initial.catId || '');
@@ -464,7 +514,7 @@ function EntryModal({ initial, cats, onClose }) {
                 <option value=${initial.catId}>（削除済みカテゴリ: ${initial.catId}）</option>
               `}
               ${cats.map(c => html`
-                <option key=${c.id} value=${c.id}>${deptLabel(c.dept)} / ${c.name}</option>
+                <option key=${c.id} value=${c.id}>${catOptionLabel(c, staffMap)}</option>
               `)}
             </select>
           </div>

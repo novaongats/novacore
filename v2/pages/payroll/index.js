@@ -1,6 +1,6 @@
 /* ============================================================
    NOVA Core v2 — Payroll page (tab container)
-   9 tabs covering the full monthly/annual payroll workflow.
+   10 tabs covering the full monthly/annual payroll workflow.
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -16,6 +16,7 @@ import { AssessmentTab } from './assessment.js';
 import { YearEndTab }    from './year-end.js';
 import { RatesTab }      from './rates.js';
 import { BanksTab }      from './banks.js';
+import { MailerTab }     from './mailer.js';
 
 const html = htm.bind(h);
 
@@ -28,6 +29,7 @@ const TABS = [
   { id: 'assessment', label: '📐 算定基礎届' },
   { id: 'year-end',   label: '🎊 年末調整' },
   { id: 'banks',      label: '🏦 振込口座' },
+  { id: 'mailer',     label: '📧 明細送付' },
   { id: 'rates',      label: '⚙ 料率設定' },
 ];
 
@@ -54,6 +56,7 @@ export function PayrollPage({ user }) {
         ${tab === 'assessment' && html`<${AssessmentTab} />`}
         ${tab === 'year-end'   && html`<${YearEndTab} />`}
         ${tab === 'banks'      && html`<${BanksTab} />`}
+        ${tab === 'mailer'     && html`<${MailerTab} />`}
         ${tab === 'rates'      && html`<${RatesTab} />`}
       </div>
     </div>

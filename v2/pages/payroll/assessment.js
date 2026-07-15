@@ -2,13 +2,14 @@
    NOVA Core v2 — Payroll / 算定基礎届
    April/May/June mean → determine new standard remuneration.
    Updates emp.stdRemuneration on apply.
+   + 随時改定（月額変更届）の簡易チェック（アラートのみ・自動適用なし）
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
 import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 import { repos, useCollection, where } from '../../store.js';
-import { formatYen, asArray, toCsv, downloadTextFile } from '../../shared.js';
+import { formatYen, asArray, toCsv, downloadTextFile, thisMonth, addMonths, monthLabel } from '../../shared.js';
 import { getHealthStandard, findGrade, autoStdBase } from './calc.js';
 import { EMP_TYPE_MAP } from './constants.js';
 
@@ -28,6 +29,14 @@ export function AssessmentTab() {
       where('month', '<=', `${year}-06`),
     ],
     [year],
+  );
+
+  // 随時改定チェック用: 直近13ヶ月の給与レコード（変動月+3ヶ月の判定に十分な範囲）
+  const revFrom = useMemo(() => addMonths(thisMonth(), -13), []);
+  const recentRecords = useCollection(
+    repos.payrollRecords,
+    () => [where('month', '>=', revFrom)],
+    [revFrom],
   );
 
   const empList = asArray(employees.data);
@@ -195,6 +204,108 @@ export function AssessmentTab() {
           </table>
         </div>
       `}
+
+      <${SuddenRevisionSection}
+        employees=${empList}
+        records=${asArray(recentRecords.data)}
+        loading=${recentRecords.loading}
+      />
+    </div>
+  `;
+}
+
+// ---- 随時改定（月額変更届）簡易チェック --------------------------------------
+// 固定的賃金（basePay）が前月と変わった月を起点に、その月からの連続3ヶ月の
+// 総支給平均で等級を算定し、現在の標準報酬と2等級以上の差があれば警告する。
+// 支払基礎日数（17日以上）などの法定要件は判定しない簡易版。自動適用はしない。
+
+/** 検知ロジック（純関数）。従業員ごとに最新の該当変動のみ返す。 */
+export function detectSuddenRevisions(employees, records) {
+  const byEmp = new Map();
+  for (const r of records) {
+    if (!r?.empId || !r?.month) continue;
+    if (!byEmp.has(r.empId)) byEmp.set(r.empId, []);
+    byEmp.get(r.empId).push(r);
+  }
+  const alerts = [];
+  for (const emp of employees) {
+    if (emp.archived) continue;
+    const recs = (byEmp.get(emp.id) || [])
+      .sort((a, b) => a.month.localeCompare(b.month));
+    const byMonth = new Map(recs.map(r => [r.month, r]));
+    let hit = null;
+    for (let i = 1; i < recs.length; i++) {
+      const prev = recs[i - 1];
+      const cur = recs[i];
+      // 連続する月のみ比較（欠落月をまたぐ比較は誤検知のもと）
+      if (addMonths(prev.month, 1) !== cur.month) continue;
+      // 固定的賃金（基本給）の変動があった月を起点にする
+      if ((Number(cur.basePay) || 0) === (Number(prev.basePay) || 0)) continue;
+      const m0 = cur.month;
+      const r1 = byMonth.get(addMonths(m0, 1));
+      const r2 = byMonth.get(addMonths(m0, 2));
+      if (!r1 || !r2) continue;  // 変動後3ヶ月そろってから判定
+      const avg = Math.round(
+        ((Number(cur.gross) || 0) + (Number(r1.gross) || 0) + (Number(r2.gross) || 0)) / 3);
+      const newStd = getHealthStandard(avg);
+      const curStd = emp.stdRemuneration
+        || (autoStdBase(emp) > 0 ? getHealthStandard(autoStdBase(emp)) : 0);
+      const gradeDiff = (findGrade(newStd) || 0) - (findGrade(curStd) || 0);
+      if (Math.abs(gradeDiff) >= 2) {
+        // 改定月 = 変動月から数えて4ヶ月目（変更届の提出・新等級の適用開始）
+        hit = { emp, changeMonth: m0, avg, newStd, curStd, gradeDiff,
+                applyMonth: addMonths(m0, 3) };
+      }
+    }
+    if (hit) alerts.push(hit);
+  }
+  return alerts;
+}
+
+function SuddenRevisionSection({ employees, records, loading }) {
+  const alerts = useMemo(
+    () => detectSuddenRevisions(employees, records),
+    [employees, records]);
+
+  return html`
+    <div class="card" style=${{ padding: 20, marginTop: 18 }}>
+      <div style=${{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+        🔔 随時改定（月額変更届）チェック
+      </div>
+      <div style=${{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+        役員報酬や固定給を変更した月から連続3ヶ月の給与平均で等級を再算定し、
+        現在の標準報酬と<strong>2等級以上</strong>の差がある場合に表示します
+        （直近13ヶ月の給与レコードから判定・支払基礎日数は考慮しない簡易版）。
+      </div>
+
+      ${loading ? html`
+        <div style=${{ color: 'var(--text-3)', fontSize: 13 }}>給与レコードを読込中...</div>
+      ` : alerts.length === 0 ? html`
+        <div class="note note-ok" style=${{ fontSize: 13 }}>
+          現在、随時改定に該当しそうな従業員はいません（固定給の変動後3ヶ月が揃った時点で判定されます）。
+        </div>
+      ` : html`
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          ${alerts.map(a => html`
+            <div key=${a.emp.id} class="note note-warn" style=${{ margin: 0 }}>
+              <strong>${a.emp.name}</strong>:
+              随時改定の可能性 — ${monthLabel(a.changeMonth)}に固定給が変動、
+              3ヶ月平均 ${formatYen(a.avg)} → 標準報酬 ${formatYen(a.newStd)}
+              (${findGrade(a.newStd) || '-'}級) で現在の ${formatYen(a.curStd)}
+              (${findGrade(a.curStd) || '-'}級) から
+              <strong>${a.gradeDiff > 0 ? '+' : ''}${a.gradeDiff}等級</strong>。<br/>
+              → <strong>${monthLabel(a.applyMonth)}に月額変更届を提出 →
+              ${monthLabel(a.applyMonth)}分の保険料から新等級</strong>が適用される見込みです。
+            </div>
+          `)}
+        </div>
+      `}
+
+      <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 10 }}>
+        ※ このチェックは自動では何も変更しません（標準報酬の更新は上の算定基礎届か従業員マスタから）。<br/>
+        ※ 支払基礎日数17日以上・固定的賃金の増減と平均の増減の方向一致などの法定要件は
+        簡易化しているため、<strong>実際の届出の要否は必ず税理士に確認してください</strong>。
+      </div>
     </div>
   `;
 }

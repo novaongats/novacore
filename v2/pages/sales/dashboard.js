@@ -103,8 +103,11 @@ export function DashboardTab() {
  * - catId がカテゴリマスタに無い / catId が無い（dept のみの v1 移行レコード）場合も
  *   疑似カテゴリ行として集計に含める（無言で捨てない → KPI 合計がホーム・売上タブと一致）。
  * - type:'expense'（v1 手入力経費）は売上ではなくコスト（legacyExpense）に計上する。
+ *
+ * by-staff.js（担当者別タブ）からも import される。集計定義を変えるときは
+ * 両タブの合計が一致し続けることを確認すること。
  */
-function buildGrid(cats, entries, costs, months) {
+export function buildGrid(cats, entries, costs, months) {
   const monthSet = new Set(months);
   const grid = new Map();
   const catMap = new Map(cats.map(c => [c.id, c]));
@@ -169,7 +172,7 @@ function buildGrid(cats, entries, costs, months) {
   return grid;
 }
 
-function rowCost(row) {
+export function rowCost(row) {
   return row.manualCost + row.revShareCost + (row.legacyExpense || 0);
 }
 

@@ -74,7 +74,7 @@ export const EXPENSE_ACCOUNTS = [
   { key: 'labor',        label: '人件費'       },
   { key: 'depreciation', label: '減価償却費'   },
   { key: 'vehicle',      label: '車両費'       },
-  { key: 'insurance',    label: '保険料'       },
+  { key: 'insurance',    label: '保険料（火災）' },
   { key: 'misc',         label: '雑費'         },
 ];
 

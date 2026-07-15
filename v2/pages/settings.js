@@ -15,6 +15,8 @@ import {
   changePassword, createUser, listUsers, saveProfile, isAdmin,
 } from '../auth.js';
 import { previewImport, runImport, listMappings, fetchLegacyFromCloud } from '../importer.js';
+import { repos, useCollection } from '../store.js';
+import { uid } from '../shared.js';
 import { IssuerTab } from './invoices/issuer.js';
 import { RatesTab } from './payroll/rates.js';
 import { DeptsAdminSection } from './depts-admin.js';
@@ -160,13 +162,201 @@ function ProfileTab({ user }) {
 function CompanyTab() {
   return html`
     <div class="note note-info">
-      会社情報（請求書・領収書の発行元として使用）と、事業（部門）マスタの管理です。
+      会社情報（請求書・領収書の発行元として使用）と、事業（部門）・担当者マスタの管理です。
     </div>
     <${IssuerTab} />
     <div style=${{ marginTop: 20 }}></div>
     <${DeptsAdminSection} />
+    <div style=${{ marginTop: 20 }}></div>
+    <${StaffAdminSection} />
   `;
 }
+
+// ---- 担当者マスタ（staffMembers, v1 nova_members 由来） ----------------------
+
+const STAFF_COLOR_CHOICES = [
+  '#6366f1', '#7c3aed', '#0ea5e9', '#059669', '#f59e0b',
+  '#e11d48', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b',
+];
+
+function StaffAdminSection() {
+  const { data: members, loading, error } = useCollection(repos.staffMembers);
+  const [editing, setEditing] = useState(null); // null | {} | member
+  const [err, setErr] = useState(null);
+
+  // アーカイブ済みは末尾、それ以外は名前順（ja）
+  const sorted = [...members].sort((a, b) => {
+    if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1;
+    return (a.name || '').localeCompare(b.name || '', 'ja');
+  });
+
+  async function toggleArchive(m) {
+    const msg = m.archived
+      ? `「${m.name}」のアーカイブを解除しますか？（カテゴリの担当者選択肢に復活します）`
+      : `「${m.name}」をアーカイブしますか？\n新規選択肢から消えますが、担当カテゴリ・過去の集計はそのまま残ります。`;
+    if (!confirm(msg)) return;
+    setErr(null);
+    try {
+      await repos.staffMembers.setId(m.id, { archived: !m.archived });
+    } catch (e) {
+      setErr('更新に失敗: ' + (e.message || e));
+    }
+  }
+
+  return html`
+    <div class="card settings-card">
+      <h3 style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>👥 担当者マスタ</span>
+        <button class="btn" onClick=${() => setEditing({})}>＋ 担当者を追加</button>
+      </h3>
+      <div class="note note-info">
+        売上カテゴリの「担当者」として使うマスタです（ログインユーザーとは別）。<br/>
+        使わなくなった担当者は「アーカイブ」してください（過去データ保護のため削除はできません）。
+      </div>
+      ${err && html`<div class="note note-err">${err}</div>`}
+      ${error && html`<div class="note note-err">読込エラー: ${error.message || String(error)}</div>`}
+      ${loading && html`<div style=${{ color: 'var(--text-3)' }}>読込中...</div>`}
+      ${!loading && sorted.length === 0 && html`
+        <div style=${{ color: 'var(--text-3)', fontSize: 13 }}>
+          担当者がまだ登録されていません（v1 からの移行は「データ移行」タブで実行できます）。
+        </div>
+      `}
+
+      ${sorted.length > 0 && html`
+        <table style=${{ width: '100%', fontSize: 13 }}>
+          <tbody>
+            ${sorted.map(m => html`
+              <tr key=${m.id} style=${{
+                borderTop: '1px solid var(--border-2)',
+                opacity: m.archived ? 0.5 : 1,
+              }}>
+                <td style=${{ padding: '9px 4px', width: 30 }}>
+                  <span style=${{
+                    display: 'inline-block', width: 14, height: 14,
+                    borderRadius: '50%', background: m.color || '#94a3b8',
+                  }}></span>
+                </td>
+                <td style=${{ padding: '9px 4px', fontWeight: 600 }}>
+                  ${m.name || '(無名)'}
+                  <span style=${{ marginLeft: 8, fontSize: 11, color: 'var(--text-4)',
+                                  fontFamily: 'var(--font-mono)' }}>${m.id}</span>
+                  ${m.archived && html`<span style=${{
+                    marginLeft: 8, fontSize: 10, padding: '1px 6px', borderRadius: 999,
+                    background: 'var(--bg-alt)', color: 'var(--text-3)', fontWeight: 600,
+                  }}>アーカイブ済</span>`}
+                </td>
+                <td style=${{ padding: '9px 4px', color: 'var(--text-3)', fontSize: 12 }}>${m.role || '-'}</td>
+                <td style=${{ padding: '9px 4px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button class="btn btn-ghost" style=${staffBtnSm}
+                          onClick=${() => setEditing(m)}>編集</button>
+                  <button class="btn btn-ghost"
+                          style=${{ ...staffBtnSm, color: m.archived ? 'var(--success)' : 'var(--danger)' }}
+                          onClick=${() => toggleArchive(m)}>
+                    ${m.archived ? '復活' : 'アーカイブ'}
+                  </button>
+                </td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      `}
+
+      ${editing && html`
+        <${StaffModal} initial=${editing} onClose=${() => setEditing(null)} />
+      `}
+    </div>
+  `;
+}
+
+function StaffModal({ initial, onClose }) {
+  const isNew = !initial.id;
+  const [form, setForm] = useState(() => ({
+    name: initial.name || '',
+    role: initial.role || '',
+    color: initial.color || STAFF_COLOR_CHOICES[0],
+  }));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function save() {
+    setErr(null);
+    const name = form.name.trim();
+    if (!name) { setErr('名前は必須です'); return; }
+    setBusy(true);
+    try {
+      const id = isNew ? uid('stf_') : initial.id;
+      await repos.staffMembers.setId(id, {
+        name,
+        role: form.role.trim(),
+        color: form.color,
+        ...(isNew ? { archived: false } : {}),
+      });
+      onClose();
+    } catch (e) {
+      setErr('保存に失敗: ' + (e.message || e));
+      setBusy(false);
+    }
+  }
+
+  return html`
+    <div style=${staffModalBackdrop} onClick=${e => e.target === e.currentTarget && onClose()}>
+      <div style=${staffModalCard}>
+        <h3 style=${{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>
+          ${isNew ? '担当者を追加' : `「${initial.name}」を編集`}
+        </h3>
+        ${err && html`<div class="note note-err">${err}</div>`}
+
+        <div class="field">
+          <label>名前 *</label>
+          <input type="text" value=${form.name}
+                 onInput=${e => set('name', e.target.value)} disabled=${busy}
+                 placeholder="例: 志賀" />
+        </div>
+        <div class="field">
+          <label>役割（任意）</label>
+          <input type="text" value=${form.role}
+                 onInput=${e => set('role', e.target.value)} disabled=${busy}
+                 placeholder="例: SNS運用" />
+        </div>
+        <div class="field">
+          <label>カラー</label>
+          <div style=${{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            ${STAFF_COLOR_CHOICES.map(c => html`
+              <button key=${c} type="button" onClick=${() => set('color', c)} disabled=${busy}
+                      style=${{
+                        width: 30, height: 30, borderRadius: 8, background: c,
+                        border: form.color === c ? '3px solid var(--text)' : '3px solid transparent',
+                        cursor: 'pointer',
+                      }}></button>
+            `)}
+            <input type="color" value=${form.color}
+                   onInput=${e => set('color', e.target.value)} disabled=${busy}
+                   style=${{ width: 40, height: 30, border: 'none', background: 'transparent', cursor: 'pointer' }} />
+          </div>
+        </div>
+
+        <div style=${{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button class="btn btn-ghost" onClick=${onClose} disabled=${busy}>キャンセル</button>
+          <button class="btn" onClick=${save} disabled=${busy}>${busy ? '保存中...' : '保存'}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+const staffBtnSm = { padding: '4px 8px', fontSize: 12 };
+const staffModalBackdrop = {
+  position: 'fixed', inset: 0, background: 'rgba(12,12,20,0.5)',
+  backdropFilter: 'blur(4px)', zIndex: 9999,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+};
+const staffModalCard = {
+  background: 'var(--surface)', borderRadius: 16, padding: 28,
+  maxWidth: 480, width: '100%', boxShadow: 'var(--shadow-lg)',
+  maxHeight: '90vh', overflow: 'auto',
+};
 
 // ---- Users tab (admin only) ------------------------------------------------
 

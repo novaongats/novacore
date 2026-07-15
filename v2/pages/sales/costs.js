@@ -25,6 +25,12 @@ export function CostsTab() {
   const [editing, setEditing] = useState(null); // { cat, costDoc }
 
   const cats = useCollection(repos.salesCategories);
+  const staff = useCollection(repos.staffMembers);
+  const staffMap = useMemo(() => {
+    const m = new Map();
+    for (const s of asArray(staff.data)) m.set(s.id, s);
+    return m;
+  }, [staff.data]);
 
   const costs = useCollection(
     repos.salesCosts,
@@ -113,6 +119,7 @@ export function CostsTab() {
         ` : html`
           <${CategoryList}
             perCat=${perCat}
+            staffMap=${staffMap}
             onEdit=${(cat, costDoc) => setEditing({ cat, costDoc, month })}
           />
         `}
@@ -129,6 +136,7 @@ export function CostsTab() {
         <${CostSheetModal}
           month=${editing.month}
           cat=${editing.cat}
+          staffName=${editing.cat.staffId ? (staffMap.get(editing.cat.staffId)?.name || editing.cat.staffId) : ''}
           costDoc=${editing.costDoc}
           revenue=${perCat.get(editing.cat.id)?.revenue || 0}
           onClose=${() => setEditing(null)}
@@ -178,7 +186,7 @@ function KpiCard({ label, value, accent }) {
 
 // ---- Category list ---------------------------------------------------------
 
-function CategoryList({ perCat, onEdit }) {
+function CategoryList({ perCat, staffMap, onEdit }) {
   const depts = useDepts();
   // Group by dept
   const rows = Array.from(perCat.values());
@@ -207,7 +215,7 @@ function CategoryList({ perCat, onEdit }) {
           </div>
           <div class="card" style=${{ padding: 0, overflow: 'hidden' }}>
             ${grouped.get(deptKey).map(row => html`
-              <${CategoryRow} key=${row.cat.id} row=${row}
+              <${CategoryRow} key=${row.cat.id} row=${row} staffMap=${staffMap}
                              onEdit=${() => onEdit(row.cat, row.costDoc)} />
             `)}
           </div>
@@ -217,12 +225,13 @@ function CategoryList({ perCat, onEdit }) {
   `;
 }
 
-function CategoryRow({ row, onEdit }) {
+function CategoryRow({ row, staffMap, onEdit }) {
   const { cat, revenue, manualCost, revShareCost } = row;
   const totalCost = manualCost + revShareCost;
   const profit = revenue - totalCost;
   const hasCost = manualCost > 0 || revShareCost > 0;
   const hasRev = revenue > 0;
+  const staffName = cat.staffId ? (staffMap?.get(cat.staffId)?.name || cat.staffId) : '';
 
   return html`
     <div style=${{
@@ -235,10 +244,11 @@ function CategoryRow({ row, onEdit }) {
         <div style=${{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>${cat.name}</div>
         <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
           ${cat.group || '-'}
+          ${staffName && html`<span style=${{ marginLeft: 6 }}>· 担当: ${staffName}</span>`}
           ${cat.revShare?.enabled && html`<span style=${{
             marginLeft: 6, fontSize: 10, padding: '1px 6px',
             background: 'var(--primary-soft)', color: 'var(--primary)', borderRadius: 4,
-          }}>レベシェア ${cat.revShare.companyPct}%</span>`}
+          }} title=${`カテゴリのレベシェア設定 ${cat.revShare.companyPct}% に基づく自動計算（外注費 ${100 - (Number(cat.revShare.companyPct) || 0)}%）`}>レベシェア ${cat.revShare.companyPct}%</span>`}
         </div>
       </div>
       <div class="num" style=${{ textAlign: 'right', color: hasRev ? 'var(--text)' : 'var(--text-4)' }}>
@@ -292,7 +302,7 @@ function OrphanSection({ orphans, month, onEdit }) {
 
 // ---- Cost-sheet edit modal -------------------------------------------------
 
-function CostSheetModal({ month, cat, costDoc, revenue, onClose }) {
+function CostSheetModal({ month, cat, staffName, costDoc, revenue, onClose }) {
   const [items, setItems] = useState(() =>
     asArray(costDoc?.items).map(i => ({
       key: Math.random().toString(36).slice(2),
@@ -364,7 +374,7 @@ function CostSheetModal({ month, cat, costDoc, revenue, onClose }) {
           <div>
             <div style=${{ fontWeight: 700, fontSize: 16 }}>月次コスト編集</div>
             <div style=${{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
-              ${monthLabel(month)} · ${deptLabel(cat.dept)} / ${cat.name}
+              ${monthLabel(month)} · ${deptLabel(cat.dept)} / ${cat.name}${staffName ? `（${staffName}）` : ''}
             </div>
           </div>
           <button class="btn btn-ghost" onClick=${onClose} disabled=${busy}>✕</button>
@@ -377,12 +387,17 @@ function CostSheetModal({ month, cat, costDoc, revenue, onClose }) {
             <div style=${{
               padding: 12, background: 'var(--primary-soft)', borderRadius: 10,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              fontSize: 13,
-            }}>
+              fontSize: 13, cursor: 'help',
+            }} title=${`カテゴリのレベシェア設定 ${cat.revShare.companyPct}% に基づく自動計算です（手入力不要）。当月売上 × ${100 - (Number(cat.revShare.companyPct) || 0)}% が外注費として自動計上されます。割合の変更は「カテゴリ」タブから。`}>
               <div>
                 <strong>レベシェア自動計算</strong>
+                <span style=${{
+                  marginLeft: 6, fontSize: 10, color: 'var(--text-3)',
+                  border: '1px solid var(--border)', borderRadius: '50%',
+                  padding: '0 5px', display: 'inline-block',
+                }}>?</span>
                 <div style=${{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
-                  売上 ${formatYen(revenue)} × ${100 - cat.revShare.companyPct}% 外注費
+                  売上 ${formatYen(revenue)} × ${100 - cat.revShare.companyPct}% 外注費（設定 ${cat.revShare.companyPct}% に基づく自動計算）
                 </div>
               </div>
               <div class="num" style=${{ fontWeight: 700, color: 'var(--primary)' }}>

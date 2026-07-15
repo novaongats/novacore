@@ -4,12 +4,13 @@
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
-import { useState, useMemo } from 'https://esm.sh/preact@10.22.0/hooks';
+import { useState, useMemo, useEffect } from 'https://esm.sh/preact@10.22.0/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
-import { repos, useCollection, orderBy } from '../../store.js';
-import { formatYen, monthLabel, asArray, sumBy, toCsv, downloadTextFile } from '../../shared.js';
+import { repos, useCollection, useDoc, orderBy } from '../../store.js';
+import { formatYen, formatNum, monthLabel, asArray, sumBy, toCsv, downloadTextFile } from '../../shared.js';
 import { EMP_TYPE_MAP } from './constants.js';
 import { PayslipOverlay } from './payslip.js';
+import { PrintPortal } from '../../print.js';
 
 const html = htm.bind(h);
 
@@ -20,6 +21,7 @@ export function ListTab() {
   const [filterMonth, setFilterMonth] = useState('all');
   const [filterEmp, setFilterEmp] = useState('all');
   const [preview, setPreview] = useState(null);
+  const [sheet, setSheet] = useState(null);   // { month, records } — A4横一覧印刷
 
   const rows = asArray(records.data);
   const empList = asArray(employees.data);
@@ -45,10 +47,11 @@ export function ListTab() {
   }), [filtered]);
 
   function exportCsv() {
-    const rows = [['月', '従業員ID', '氏名', '雇用形態', '総支給', '通勤手当', '健保', '年金', '介護', '子育て支援金', '雇保', '所得税', '住民税', '控除計', '差引支給']];
+    const rows = [['月', '従業員ID', '氏名', '雇用形態', '基本給', '歩合', '総支給', '通勤手当', '健保', '年金', '介護', '子育て支援金', '雇保', '所得税', '住民税', '控除計', '差引支給']];
     for (const r of filtered) {
       rows.push([
         r.month, r.empId, r.empName, EMP_TYPE_MAP[r.empType]?.label || r.empType,
+        r.basePay || 0, r.commission || 0,
         r.gross || 0, r.commuteTotal || 0, r.health || 0, r.pension || 0, r.care || 0,
         r.childSupport || 0,
         r.employment || 0, r.incomeTax || 0, r.residentTax || 0,
@@ -56,6 +59,16 @@ export function ListTab() {
       ]);
     }
     downloadTextFile(toCsv(rows), `payroll_records_${filterMonth === 'all' ? 'all' : filterMonth}.csv`);
+  }
+
+  // 一覧印刷: 選択中の月の全従業員（従業員フィルタは無視して全員分）
+  function openSheet() {
+    if (filterMonth === 'all') return;
+    const monthRecords = rows
+      .filter(r => r.month === filterMonth)
+      .slice()
+      .sort((a, b) => (a.empName || '').localeCompare(b.empName || '', 'ja'));
+    setSheet({ month: filterMonth, records: monthRecords });
   }
 
   return html`
@@ -79,6 +92,11 @@ export function ListTab() {
           <button class="btn btn-ghost" onClick=${exportCsv} disabled=${filtered.length === 0}>
             📥 CSV出力
           </button>
+          <button class="btn btn-ghost" onClick=${openSheet}
+                  disabled=${filterMonth === 'all' || rows.every(r => r.month !== filterMonth)}
+                  title=${filterMonth === 'all' ? '月を選択すると印刷できます' : '選択月の全従業員を1枚のA4横にまとめて印刷'}>
+            🖨 一覧を印刷
+          </button>
           <button class="btn" onClick=${() => setPreview({ records: filtered })} disabled=${filtered.length === 0}>
             🖨 明細を印刷
           </button>
@@ -101,12 +119,14 @@ export function ListTab() {
         </div>
       ` : html`
         <div class="card" style=${{ padding: 0, overflow: 'auto' }}>
-          <table style=${{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <table style=${{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style=${{ background: 'var(--bg-alt)' }}>
                 <th style=${th}>月</th>
                 <th style=${th}>氏名</th>
                 <th style=${th}>形態</th>
+                <th style=${{ ...th, textAlign: 'right' }}>基本給</th>
+                <th style=${{ ...th, textAlign: 'right' }}>歩合</th>
                 <th style=${{ ...th, textAlign: 'right' }}>総支給</th>
                 <th style=${{ ...th, textAlign: 'right' }}>社保</th>
                 <th style=${{ ...th, textAlign: 'right' }}>所得税</th>
@@ -122,6 +142,10 @@ export function ListTab() {
                   <td style=${td}>${r.empName}</td>
                   <td style=${{ ...td, fontSize: 11, color: 'var(--text-3)' }}>
                     ${EMP_TYPE_MAP[r.empType]?.label || r.empType}
+                  </td>
+                  <td class="num" style=${{ ...td, textAlign: 'right', color: 'var(--text-2)' }}>${formatYen(r.basePay)}</td>
+                  <td class="num" style=${{ ...td, textAlign: 'right', color: 'var(--text-2)' }}>
+                    ${(r.commission || 0) > 0 ? formatYen(r.commission) : '-'}
                   </td>
                   <td class="num" style=${{ ...td, textAlign: 'right' }}>${formatYen(r.gross)}</td>
                   <td class="num" style=${{ ...td, textAlign: 'right', color: 'var(--text-2)' }}>${formatYen(r.social)}</td>
@@ -147,9 +171,191 @@ export function ListTab() {
       ${preview && html`
         <${PayslipOverlay} records=${preview.records} onClose=${() => setPreview(null)} />
       `}
+      ${sheet && html`
+        <${PayrollSheetOverlay} month=${sheet.month} records=${sheet.records}
+                                onClose=${() => setSheet(null)} />
+      `}
     </div>
   `;
 }
+
+// ---- 給与一覧表（A4横・全従業員1枚）印刷オーバーレイ --------------------------
+
+const SHEET_NUM_COLS = [
+  { key: 'basePay',      label: '基本給' },
+  { key: 'commission',   label: '歩合' },
+  { key: 'allowance',    label: '諸手当' },
+  { key: 'commuteTotal', label: '通勤' },
+  { key: 'gross',        label: '総支給', strong: true },
+  { key: 'health',       label: '健保' },
+  { key: 'pension',      label: '厚年' },
+  { key: 'care',         label: '介護' },
+  { key: 'childSupport', label: '支援金' },
+  { key: 'employment',   label: '雇用' },
+  { key: 'incomeTax',    label: '所得税' },
+  { key: 'residentTax',  label: '住民税' },
+  { key: 'totalDed',     label: '控除計', strong: true },
+  { key: 'net',          label: '差引支給', strong: true },
+];
+
+function PayrollSheetOverlay({ month, records, onClose }) {
+  const issuerQ = useDoc(repos.settings, 'invoiceIssuer');
+  const company = issuerQ.data?.companyName || '有限会社NOVA';
+  const printed = new Date().toLocaleDateString('ja-JP');
+
+  // A4横の @page はオーバーレイ表示中のみ有効化し、閉じたら必ず除去する。
+  // taxdoc の applyPageOrientation（#taxdoc-page-orient）とは別の style 要素で
+  // 管理し、後から head に追加することで表示中はこちらが優先される。
+  useEffect(() => {
+    const el = document.createElement('style');
+    el.id = 'payroll-sheet-orient';
+    el.textContent = '@media print { @page { size: A4 landscape; margin: 0; } }';
+    document.head.appendChild(el);
+    return () => { el.remove(); };
+  }, []);
+
+  const totals = {};
+  for (const c of SHEET_NUM_COLS) totals[c.key] = sumBy(records, r => r[c.key]);
+
+  return html`
+    <${PrintPortal}>
+    <div class="paysheet-overlay">
+      <div class="paysheet-toolbar no-print">
+        <div style=${{ color: '#fff', fontWeight: 600 }}>
+          給与一覧表
+          <span style=${{ marginLeft: 10, fontSize: 12, opacity: .7 }}>
+            ${monthLabel(month)} · ${records.length} 名 · A4横
+          </span>
+        </div>
+        <div style=${{ display: 'flex', gap: 8 }}>
+          <button class="btn" style=${{ background: '#10b981' }}
+                  onClick=${() => window.print()}>🖨 印刷 / PDF保存</button>
+          <button class="btn btn-ghost" onClick=${onClose}
+                  style=${{ background: 'rgba(255,255,255,.12)', color: '#fff', borderColor: 'transparent' }}>
+            ✕ 閉じる
+          </button>
+        </div>
+      </div>
+
+      <div class="paysheet-stage">
+        <div class="paysheet-paper">
+          <div class="paysheet-head">
+            <div>
+              <div class="paysheet-title">給与一覧表</div>
+              <div class="paysheet-sub">対象月: <strong>${monthLabel(month)}</strong>（単位: 円）</div>
+            </div>
+            <div class="paysheet-corp">
+              <div class="name">${company}</div>
+              <div class="meta">出力日: ${printed} · NOVA Core</div>
+            </div>
+          </div>
+
+          <table class="paysheet-table">
+            <thead>
+              <tr>
+                <th style=${{ textAlign: 'left' }}>氏名</th>
+                <th style=${{ textAlign: 'left' }}>形態</th>
+                ${SHEET_NUM_COLS.map((c, i) => html`
+                  <th key=${i} style=${{ textAlign: 'right' }}>${c.label}</th>
+                `)}
+              </tr>
+            </thead>
+            <tbody>
+              ${records.map(r => html`
+                <tr key=${r.id}>
+                  <td class="name">${r.empName || '-'}</td>
+                  <td>${EMP_TYPE_MAP[r.empType]?.label || r.empType || '-'}</td>
+                  ${SHEET_NUM_COLS.map((c, i) => html`
+                    <td key=${i} class=${'num' + (c.strong ? ' strong' : '')}>
+                      ${(r[c.key] || 0) !== 0 ? formatNum(r[c.key]) : '-'}
+                    </td>
+                  `)}
+                </tr>
+              `)}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="2">合計（${records.length} 名）</td>
+                ${SHEET_NUM_COLS.map((c, i) => html`
+                  <td key=${i} class="num">${formatNum(totals[c.key])}</td>
+                `)}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      ${sheetStyle}
+    </div>
+    </${PrintPortal}>
+  `;
+}
+
+const sheetStyle = html`
+<style>
+  .paysheet-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.92);
+    z-index: 99999; display: flex; flex-direction: column;
+  }
+  .paysheet-toolbar {
+    padding: 12px 20px; background: #1e293b; flex-shrink: 0;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .paysheet-stage {
+    flex: 1; overflow: auto; padding: 24px; background: #2a3442;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .paysheet-paper {
+    width: 297mm; min-height: 210mm; padding: 12mm 12mm;
+    background: #fff; color: #111;
+    font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif;
+    font-size: 9pt; line-height: 1.5;
+    box-shadow: 0 4px 24px rgba(0,0,0,.3); box-sizing: border-box;
+  }
+  .paysheet-head {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    border-bottom: 2pt solid #111; padding-bottom: 6pt; margin-bottom: 10pt;
+  }
+  .paysheet-title { font-size: 15pt; font-weight: 800; letter-spacing: .1em; }
+  .paysheet-sub { font-size: 8.5pt; color: #444; margin-top: 3pt; }
+  .paysheet-corp { text-align: right; }
+  .paysheet-corp .name { font-size: 11pt; font-weight: 700; }
+  .paysheet-corp .meta { font-size: 8pt; color: #777; margin-top: 2pt; }
+
+  .paysheet-table { width: 100%; border-collapse: collapse; font-size: 7.6pt; }
+  .paysheet-table th {
+    background: #f0f0f0; border: .5pt solid #999;
+    padding: 3.5pt 4pt; font-weight: 700; font-size: 7.2pt; white-space: nowrap;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .paysheet-table td {
+    border: .5pt solid #bbb; padding: 3pt 4pt; white-space: nowrap;
+  }
+  .paysheet-table td.name { font-weight: 600; }
+  .paysheet-table td.num {
+    text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 7.4pt;
+  }
+  .paysheet-table td.num.strong { font-weight: 700; }
+  .paysheet-table tbody tr:nth-child(even) td { background: #fafafa;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .paysheet-table tfoot td {
+    border-top: 1.2pt solid #333; font-weight: 700; background: #f5f5f5;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .paysheet-table tfoot td.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
+
+  /* @page (A4 landscape) は表示中のみ #payroll-sheet-orient (head) が管理する */
+  @media print {
+    body { background: #fff !important; }
+    .no-print { display: none !important; }
+    .paysheet-overlay { position: static; background: #fff; }
+    .paysheet-stage { padding: 0; background: #fff; overflow: visible; display: block; }
+    .paysheet-paper { box-shadow: none; width: auto; min-height: 0; }
+    .paysheet-table tr { break-inside: avoid; }
+    .paysheet-table thead { display: table-header-group; }
+  }
+</style>
+`;
 
 function Kpi({ label, value, primary }) {
   return html`
@@ -170,11 +376,13 @@ const selectCompact = {
   padding: '8px 10px', border: '1px solid var(--border)',
   borderRadius: 8, background: 'var(--surface)', fontSize: 12,
 };
+// 列が増えたため（基本給・歩合）paddingを詰めて収める
 const th = {
-  padding: '10px 14px', textAlign: 'left',
-  color: 'var(--text-3)', fontWeight: 600, fontSize: 11,
-  textTransform: 'uppercase', letterSpacing: '0.04em',
+  padding: '9px 9px', textAlign: 'left',
+  color: 'var(--text-3)', fontWeight: 600, fontSize: 10.5,
+  textTransform: 'uppercase', letterSpacing: '0.02em',
+  whiteSpace: 'nowrap',
 };
 const td = {
-  padding: '10px 14px',
+  padding: '9px 9px', whiteSpace: 'nowrap',
 };

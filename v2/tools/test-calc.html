@@ -34,7 +34,7 @@ import {
 import { calcIncomeTaxForMonth, getBonusTaxRateForMonth } from '../pages/payroll/tax-table.js';
 import { salaryIncomeDeduction, basicDeduction, calcAnnualTax } from '../pages/payroll/year-end.js';
 import { prevMonthTaxBasis, pickPrevMonthRecords } from '../pages/payroll/bonus.js';
-import { zenginKana } from '../pages/payroll/banks.js';
+import { zenginKana, zenginField, buildZenginLines, encodeSjisKana } from '../pages/payroll/banks.js';
 import { getIncomeWalls } from '../pages/payroll/constants.js';
 
 const out = document.getElementById('out');
@@ -83,12 +83,26 @@ eq('年次切替: 2026-01は新方式', calcIncomeTaxForMonth(350000, 0, '2026-0
 
 // ============ 3. 社会保険料 ============
 section('3. 社会保険料（標準報酬30万円・東京・令和8年度料率）');
+// ※ 以下の金額はすべて端数が出ないため、端数モード（floor/gojyo）に依存しない
 eq('健康保険 (9.85%折半)', calcHealthPremium(300000, 9.85), 14775);
 eq('厚生年金 (18.3%折半)', calcPensionPremium(300000, 18.3), 27450);
 eq('厚生年金の上限 (標報100万→65万でキャップ)', calcPensionPremium(1000000, 18.3), Math.round(650000 * 0.183 / 2));
 eq('子育て支援金 (0.23%折半)', calcChildSupportPremium(300000, 0.23), 345);
-eq('端数処理: 50銭ちょうどは切捨て', roundShakai(14970.5), 14970);
-eq('端数処理: 50銭超は切上げ', roundShakai(14970.51), 14971);
+// --- 端数処理モード ---
+// 'gojyo' = 法定の50銭ルール（50銭以下切捨て・50銭超切上げ）
+eq('端数処理(gojyo): 50銭ちょうどは切捨て', roundShakai(14970.5, 'gojyo'), 14970);
+eq('端数処理(gojyo): 50銭超は切上げ', roundShakai(14970.51, 'gojyo'), 14971);
+// 'floor'（既定） = 円未満切捨て（税理士方式。v1 最終版の Math.floor と同一）
+eq('端数処理(既定=floor): 50銭超も切捨て', roundShakai(14970.51), 14970);
+eq('端数処理(floor): 99銭も切捨て', roundShakai(14970.99, 'floor'), 14970);
+// 端数が出る料率ケースの手検算（標準報酬98,000円・愛知9.93%）:
+//   健保 98,000 × 9.93% ÷ 2 = 4,865.7 → floor 4,865 / gojyo(0.7>0.5) 4,866
+//   支援金 98,000 × 0.23% ÷ 2 = 112.7 → floor 112 / gojyo 113
+//   介護 98,000 × 1.62% ÷ 2 = 793.8 → floor 793 / gojyo 794
+eq('健康保険 端数あり(既定=floor): 4,865.7→4,865', calcHealthPremium(98000, 9.93), 4865);
+eq('健康保険 端数あり(gojyo): 4,865.7→4,866', calcHealthPremium(98000, 9.93, 'gojyo'), 4866);
+eq('子育て支援金 端数あり(既定=floor): 112.7→112', calcChildSupportPremium(98000, 0.23), 112);
+eq('子育て支援金 端数あり(gojyo): 112.7→113', calcChildSupportPremium(98000, 0.23, 'gojyo'), 113);
 
 // ============ 4. 標準報酬月額 ============
 section('4. 標準報酬月額');
@@ -166,11 +180,23 @@ eq('effectiveDate が YYYY-MM 形式でない履歴docは無視（console.warn�
    getRatesFor('2026-07', [{ effectiveDate: '2026/04', pension: 1 }]).pension, 18.3);
 eq('不正docを無視しても正しい履歴は解決される',
    getRatesFor('2026-07', [{ effectiveDate: '2026/04', pension: 1 }, ...hist]).employmentEmployee, 0.50);
+// --- 社保端数処理モード（shakaiRounding）の解決: 履歴 → legacy → 既定 'floor' ---
+eq('shakaiRounding: 履歴なし・legacyなし → 既定 floor', getRatesFor('2026-01', []).shakaiRounding, 'floor');
+eq('shakaiRounding: 履歴docに未設定 → floor', getRatesFor('2026-07', hist).shakaiRounding, 'floor');
+eq('shakaiRounding: 履歴docで gojyo 指定',
+   getRatesFor('2026-07', [{ effectiveDate: '2026-04', shakaiRounding: 'gojyo' }]).shakaiRounding, 'gojyo');
+eq('shakaiRounding: legacy から解決',
+   getRatesFor('2026-01', hist, { shakaiRounding: 'gojyo' }).shakaiRounding, 'gojyo');
+eq('shakaiRounding: 不正値は floor に正規化',
+   getRatesFor('2026-07', [{ effectiveDate: '2026-04', shakaiRounding: 'weird' }]).shakaiRounding, 'floor');
 
 // ============ 8. 月次給与 end-to-end ============
 section('8. 月次給与 end-to-end（正社員・東京・月給30万・扶養0・2026-07）');
 const emp1 = { type: 'regular', prefecture: 'tokyo', monthlySalary: 300000,
                dependents: 0, residentTax: 10000, stdRemuneration: 0 };
+// rates8 は shakaiRounding 未指定 → 既定の 'floor'（税理士方式）で解決される。
+// 標報30万×東京9.85%等は端数が出ない金額のため、以下の期待値は端数モードに依存しない
+// （floor 既定化の前後で同値。手検算: 健保14,775.0 / 厚年27,450.0 / 支援金345.0 / 雇保1,500.0）。
 const rates8 = getRatesFor('2026-07', [
   { effectiveDate: '2026-04', health: { tokyo: 9.85 }, care: 1.62, pension: 18.3,
     employmentEmployee: 0.50, childSupport: 0.23 },
@@ -201,6 +227,43 @@ const c4 = calcMonthlyPaycheck(emp2, { month: '2026-07', rates: rates8 });
 eq('通勤手当込みの総支給', c4.gross, 315000);
 eq('課税対象から非課税通勤手当を除外',
    c4.taxable, c4.gross - 15000 - c4.social);
+
+// ---- 端数モードの end-to-end（floor 既定 vs gojyo）----
+// 正社員・愛知9.93%・月給95,000円 → 標準報酬98,000円（93,000以上101,000未満）
+// 手検算: 健保 98,000×9.93%÷2 = 4,865.7 / 厚年 98,000×18.3%÷2 = 8,967.0（端数なし）
+//        支援金 98,000×0.23%÷2 = 112.7 / 雇保 95,000×0.5% = 475.0（端数なし）
+const empAichi = { type: 'regular', prefecture: 'aichi', monthlySalary: 95000,
+                   dependents: 0, residentTax: 0, stdRemuneration: 0 };
+const histAichi = (rounding) => [
+  { effectiveDate: '2026-04', health: { aichi: 9.93 }, care: 1.62, pension: 18.3,
+    employmentEmployee: 0.50, childSupport: 0.23, shakaiRounding: rounding },
+];
+const cfF = calcMonthlyPaycheck(empAichi, { month: '2026-07', rates: getRatesFor('2026-07', histAichi('floor')) });
+eq('floor: 標準報酬 98,000円', cfF.stdRemuneration, 98000);
+eq('floor: 健康保険 4,865.7 → 4,865（切捨て）', cfF.health, 4865);
+eq('floor: 厚生年金 8,967.0（端数なし・両モード同値）', cfF.pension, 8967);
+eq('floor: 支援金 112.7 → 112（切捨て）', cfF.childSupport, 112);
+eq('floor: 雇用保険 475.0（端数なし）', cfF.employment, 475);
+const cfG = calcMonthlyPaycheck(empAichi, { month: '2026-07', rates: getRatesFor('2026-07', histAichi('gojyo')) });
+eq('gojyo: 健康保険 4,865.7 → 4,866（50銭超切上げ）', cfG.health, 4866);
+eq('gojyo: 支援金 112.7 → 113（50銭超切上げ）', cfG.childSupport, 113);
+eq('gojyo: 厚生年金は端数なしで floor と同値', cfG.pension, 8967);
+// shakaiRounding 未指定の履歴 → 既定 floor と同じ計算になること
+const cfDef = calcMonthlyPaycheck(empAichi, {
+  month: '2026-07',
+  rates: getRatesFor('2026-07', [
+    { effectiveDate: '2026-04', health: { aichi: 9.93 }, care: 1.62, pension: 18.3,
+      employmentEmployee: 0.50, childSupport: 0.23 },
+  ]),
+});
+eq('未指定 → 既定 floor で計算（健保4,865）', cfDef.health, cfF.health);
+// 賞与も同じ端数モードが適用される（標準賞与98,000円で同じ端数が出る）
+const bF = calcBonusPaycheck(empAichi, { month: '2026-07', amount: 98000, prevMonthAfterSocial: 90000,
+                                         rates: getRatesFor('2026-07', histAichi('floor')) });
+const bG = calcBonusPaycheck(empAichi, { month: '2026-07', amount: 98000, prevMonthAfterSocial: 90000,
+                                         rates: getRatesFor('2026-07', histAichi('gojyo')) });
+eq('賞与 floor: 健保 4,865.7 → 4,865', bF.health, 4865);
+eq('賞与 gojyo: 健保 4,865.7 → 4,866', bG.health, 4866);
 
 // ============ 9. 賞与 end-to-end ============
 section('9. 賞与 end-to-end（2026-07・前月社保控除後255,930円・扶養0）');
@@ -442,6 +505,45 @@ eq('ヰ・ヱ・ヺの変換', zenginKana('ヰヱヺ'), 'ｲｴｦﾞ');
 eq('ゐ・ゑ（ひらがな経由）', zenginKana('ゐゑ'), 'ｲｴ');
 eq('結合濁点 U+3099', zenginKana('ガ'), 'ｶﾞ');
 eq('結合半濁点 U+309A', zenginKana('パ'), 'ﾊﾟ');
+
+// ============ 16. 全銀協フォーマット（固定長120バイト） ============
+section('16. 全銀協 給与振込フォーマット（buildZenginLines / encodeSjisKana）');
+eq('zenginField: 変換不能な漢字は除去（カナ・ASCIIのみ残る）', zenginField('山田 ﾀﾛｳ'), 'ﾀﾛｳ');
+const zCompany = {
+  consignorCode: '1234567890', consignorName: 'ﾕ)ﾉｳﾞｧ',
+  bankCode: '0001', bankName: 'ﾐｽﾞﾎ', branchCode: '123', branchName: 'ﾅｺﾞﾔ',
+  accountType: '普通', accountNumber: '1234567',
+};
+const zRows = [{
+  emp: { id: 'emp_a1' },
+  acct: { bankCode: '0005', bankName: 'ﾐﾂﾋﾞｼUFJ', branchCode: '456', branchName: 'ｻｶｴ',
+          accountType: '当座', accountNumber: '7654321', accountHolderKana: 'ﾔﾏﾀﾞ ﾀﾛｳ' },
+  rec: { net: 253660 },
+}];
+const zLines = buildZenginLines({ company: zCompany, rows: zRows, mmdd: '0725', payKind: 'monthly' });
+eq('レコード数 = ヘッダ+データ1+トレーラ+エンド', zLines.length, 4);
+eq('全レコードが120バイト固定長', zLines.map(l => l.length), [120, 120, 120, 120]);
+eq('ヘッダ先頭: 区分1+種別21+コード区分0+委託者コード10桁',
+   zLines[0].slice(0, 14), '1' + '21' + '0' + '1234567890');
+eq('ヘッダ: 取組日MMDD（委託者名40桁の後）', zLines[0].slice(54, 58), '0725');
+eq('データ: 区分2+銀行コード4桁', zLines[1].slice(0, 5), '20005');
+eq('データ: 預金種目 当座=2（銀行名15+支店コード3+支店名15+手形交換所4の後）',
+   zLines[1].slice(42, 43), '2');
+eq('データ: 口座番号7桁位置', zLines[1].slice(43, 50), '7654321');
+eq('データ: 受取人カナ30桁スペース埋め', zLines[1].slice(50, 80), 'ﾔﾏﾀﾞ ﾀﾛｳ' + ' '.repeat(30 - 'ﾔﾏﾀﾞ ﾀﾛｳ'.length));
+eq('データ: 金額10桁ゼロ埋め', zLines[1].slice(80, 90), '0000253660');
+eq('データ: 振込指定区分 給与=7', zLines[1].slice(111, 112), '7');
+eq('賞与は振込指定区分8',
+   buildZenginLines({ company: zCompany, rows: zRows, mmdd: '0725', payKind: 'bonus' })[1].slice(111, 112), '8');
+eq('トレーラ: 区分8+件数6桁+金額12桁', zLines[2].slice(0, 19), '8' + '000001' + '000000253660');
+eq('エンド: 区分9', zLines[3][0], '9');
+// SJIS 手組みエンコード: ASCII は同値バイト、半角カナ(U+FF61-FF9F)は 0xA1〜0xDF
+eq('SJIS: ASCII "A" → 0x41', encodeSjisKana('A')[0], 0x41);
+eq('SJIS: "｡"(U+FF61) → 0xA1', encodeSjisKana('｡')[0], 0xA1);
+eq('SJIS: "ﾟ"(U+FF9F) → 0xDF', encodeSjisKana('ﾟ')[0], 0xDF);
+eq('SJIS: "ﾔ"(U+FF94) → 0xD4', encodeSjisKana('ﾔ')[0], 0xD4);
+eq('SJIS: CR+LF はそのまま', Array.from(encodeSjisKana('\r\n')), [13, 10]);
+eq('SJIS: レコードのバイト長も120', encodeSjisKana(zLines[1]).length, 120);
 
 // ============ 結果 ============
 const sum = document.createElement('div');
