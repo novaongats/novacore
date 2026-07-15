@@ -4,11 +4,14 @@
    各ビルダーは「書類スペック」を返す:
      {
        id, title, period, scope,
-       sections: [{ heading?, note?, table?: { cols, rows, total? } }],
+       summary?: [{ label, value, emph? }],   // 冒頭の要点バンド（3〜4値）
+       sections: [{ heading?, desc?, note?, table?: { cols, rows, total? } }],
        footnotes: [string],
      }
    cols: [{ label, align?: 'right'|'center', width? }]
    rows: string|number の二次元配列（number は ¥ フォーマットで描画）
+   heading が「①②…」で始まる場合、print.js が番号バッジとして描画する。
+   desc はセクション見出しの補足（明細書類への参照など）。
 
    このスペックを print.js（A4描画）と csv 変換の両方が消費する。
    ============================================================ */
@@ -173,9 +176,15 @@ export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, p
     period: monthLabel(month),
     scope: scopeLabel(scope, depts),
     filenameBase: fileBase('pl', month, scope),
+    summary: [
+      { label: '売上高', value: yen(totalRevenue) },
+      { label: '経費合計', value: yen(totalCost) },
+      { label: '営業利益', value: yen(profit), emph: true },
+    ],
     sections: [
       {
         heading: '① 売上高（部門別）',
+        desc: '明細は「売上帳（日別明細）」参照',
         table: {
           cols: [{ label: '部門' }, { label: '金額', align: 'right' }, { label: '構成比', align: 'right' }],
           rows: revRows.length ? revRows : [['（売上なし）', '-', '-']],
@@ -184,6 +193,7 @@ export function buildPL({ month, scope, depts, cats, entries, costs, cashbook, p
       },
       {
         heading: '② 経費（勘定科目別）',
+        desc: '明細は「経費帳（勘定科目別）」参照',
         table: {
           cols: [{ label: '勘定科目' }, { label: '金額', align: 'right' }, { label: '構成比', align: 'right' }],
           rows: costRows.length ? costRows : [['（経費なし）', '-', '-']],
@@ -263,6 +273,10 @@ export function buildSalesLedger({ month, scope, depts, cats, entries }) {
     period: monthLabel(month),
     scope: scopeLabel(scope, depts),
     filenameBase: fileBase('sales-ledger', month, scope),
+    summary: [
+      { label: '計上件数', value: `${list.length}件` },
+      { label: '売上合計（税込）', value: yen(total), emph: true },
+    ],
     sections: [{
       table: {
         cols: [
@@ -353,6 +367,7 @@ export function buildExpenseLedger({ month, scope, depts, cats, entries, costs, 
     }));
 
   const grandTotal = [...groups.values()].reduce((s, g) => s + g.total, 0);
+  const detailCount = [...groups.values()].reduce((s, g) => s + g.rows.length, 0);
 
   return {
     id: 'expense-ledger',
@@ -360,6 +375,11 @@ export function buildExpenseLedger({ month, scope, depts, cats, entries, costs, 
     period: monthLabel(month),
     scope: scopeLabel(scope, depts),
     filenameBase: fileBase('expense-ledger', month, scope),
+    summary: [
+      { label: '勘定科目', value: `${groups.size}科目` },
+      { label: '明細件数', value: `${detailCount}件` },
+      { label: '経費総合計（税込）', value: yen(grandTotal), emph: true },
+    ],
     sections: sections.length ? sections : [{
       table: { cols: [{ label: '' }], rows: [['（該当月の経費はありません）']] },
     }],
@@ -402,8 +422,15 @@ export function buildCashbookDoc({ month, scope, depts, cashbook }) {
     period: monthLabel(month),
     scope: scopeLabel(scope, depts),
     filenameBase: fileBase('cashbook', month, scope),
+    summary: [
+      { label: '記帳件数', value: `${list.length}件` },
+      { label: '標準10%対象', value: yen(t10) },
+      { label: '軽減8%対象', value: yen(t8) },
+      { label: '支出合計（税込）', value: yen(total), emph: true },
+    ],
     sections: [
       {
+        heading: '① 現金支出明細（日付順）',
         table: {
           cols: [
             { label: '日付', width: 52 }, { label: '相手先' }, { label: '科目', width: 90 },
@@ -415,7 +442,8 @@ export function buildCashbookDoc({ month, scope, depts, cashbook }) {
         },
       },
       {
-        heading: '税区分別 内訳',
+        heading: '② 税区分別 内訳',
+        desc: '仕入税額控除の確認用',
         table: {
           cols: [{ label: '区分' }, { label: '金額', align: 'right' }],
           rows: [
@@ -490,6 +518,11 @@ export function buildTaxSummary({ month, scope, depts, cats, entries, costs, cas
     period: monthLabel(month),
     scope: scopeLabel(scope, depts),
     filenameBase: fileBase('tax-summary', month, scope),
+    summary: [
+      { label: '仮受消費税（概算）', value: yen(recvTax) },
+      { label: '仮払消費税（概算）', value: yen(paidTotal) },
+      { label: '差引 納付見込（概算）', value: yen(payable), emph: true },
+    ],
     sections: [
       {
         heading: '① 売上に係る消費税（仮受・概算）',
@@ -622,7 +655,8 @@ export function buildWageLedger({ month, depts, payroll, bonus, employees, rates
   }
 
   sections.push({
-    heading: `${bonusRows.length ? '③' : '②'} 源泉所得税・住民税 納付集計（納付書転記用）`,
+    heading: `${bonusRows.length ? '③' : '②'} 源泉所得税・住民税 納付集計`,
+    desc: '所得税徴収高計算書（納付書）への転記用',
     table: {
       cols: [{ label: '項目' }, { label: '人数', align: 'right' }, { label: '支給総額', align: 'right' }, { label: '税額', align: 'right' }],
       rows: [
@@ -640,6 +674,12 @@ export function buildWageLedger({ month, depts, payroll, bonus, employees, rates
     period: monthLabel(month),
     scope: '全社（本部総合）',
     filenameBase: fileBase('wage-ledger', month, 'all'),
+    summary: [
+      { label: '支給人数', value: `${payroll.length}名` },
+      { label: '総支給額（給与）', value: yen(grossTotal) },
+      ...(bonusRows.length ? [{ label: '賞与支給額', value: yen(bonusTotal) }] : []),
+      { label: '源泉所得税 納付額', value: yen(incomeTaxTotal), emph: true },
+    ],
     sections,
     footnotes: [
       '総支給 = 基本給 + 諸手当 + 通勤手当 − 控除。',
@@ -680,8 +720,15 @@ export function buildInvoiceList({ month, invoices }) {
     period: monthLabel(month),
     scope: '全社（本部総合）',
     filenameBase: fileBase('invoice-list', month, 'all'),
+    summary: [
+      { label: '有効発行', value: `${active.length}件` },
+      { label: '発行合計（税込）', value: yen(total) },
+      { label: '入金済', value: yen(paid) },
+      { label: '未入金（売掛残）', value: yen(total - paid), emph: true },
+    ],
     sections: [
       {
+        heading: '① 発行書類一覧（発行日順）',
         table: {
           cols: [
             { label: '発行日', width: 56 }, { label: '番号', width: 110 },
@@ -693,7 +740,7 @@ export function buildInvoiceList({ month, invoices }) {
         },
       },
       {
-        heading: '入金状況',
+        heading: '② 入金状況',
         table: {
           cols: [{ label: '区分' }, { label: '金額', align: 'right' }],
           rows: [
@@ -768,6 +815,12 @@ export function buildTrend({ month, scope, depts, cats, allEntries, allCosts, al
     period: `${monthLabel(months[0])} 〜 ${monthLabel(month)}`,
     scope: scopeLabel(scope, depts),
     filenameBase: fileBase('trend', month, scope),
+    summary: [
+      { label: '期間売上', value: yen(totalRev) },
+      { label: '期間経費', value: yen(totalCost) },
+      ...(scope === 'all' ? [{ label: '期間人件費', value: yen(totalPay) }] : []),
+      { label: '期間営業利益', value: yen(totalProfit), emph: true },
+    ],
     sections: [{
       table: {
         cols: [
@@ -814,8 +867,12 @@ function csvCellValue(c) {
 export function specToRows(spec) {
   const rows = [
     [spec.title, spec.period, spec.scope],
-    [],
   ];
+  // 冒頭サマリー: 書類名直後に「ラベル, 値」を横並びで1行（Excelでの検算用）
+  if (spec.summary?.length) {
+    rows.push(spec.summary.flatMap(s => [s.label, csvCellValue(s.value)]));
+  }
+  rows.push([]);
   for (const sec of spec.sections) {
     if (sec.heading) rows.push([sec.heading]);
     if (sec.table) {

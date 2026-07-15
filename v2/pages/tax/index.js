@@ -205,21 +205,48 @@ export function TaxReportPage() {
       ${loading && !loadError && html`<div style=${{ color: 'var(--text-3)', padding: 8 }}>データ読込中...</div>`}
 
       <!-- 書類カード -->
+      <style>
+        .taxcard {
+          padding: 18px; display: flex; flex-direction: column; gap: 12px;
+          transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+        }
+        .taxcard:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 28px rgba(15, 23, 42, .10);
+          border-color: var(--primary);
+        }
+        .taxcard-icon {
+          width: 42px; height: 42px; border-radius: 11px; flex-shrink: 0;
+          background: var(--primary-soft);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 20px;
+        }
+        .taxcard-num {
+          font-family: 'JetBrains Mono', monospace; font-size: 11px;
+          font-weight: 600; color: var(--text-4); letter-spacing: .1em;
+          align-self: flex-start;
+        }
+        .taxcard-scopenote {
+          font-size: 10.5px; color: var(--text-4);
+          padding: 4px 8px; border-radius: 6px;
+          background: var(--surface-hi); border: 1px dashed var(--border);
+        }
+      </style>
       <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
-        ${DOCS.map(d => {
+        ${DOCS.map((d, i) => {
           const scopeNote = !d.scoped && scope !== 'all';
           return html`
-            <div key=${d.id} class="card" style=${{ padding: 18, display: 'flex',
-                                                     flexDirection: 'column', gap: 10 }}>
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style=${{ fontSize: 22 }}>${d.icon}</span>
-                <div>
+            <div key=${d.id} class="card taxcard">
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span class="taxcard-icon">${d.icon}</span>
+                <div style=${{ flex: 1, minWidth: 0 }}>
                   <div style=${{ fontSize: 14, fontWeight: 700 }}>${d.title}</div>
-                  <div style=${{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>${d.desc}</div>
+                  <div style=${{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2, lineHeight: 1.55 }}>${d.desc}</div>
                 </div>
+                <span class="taxcard-num">${String(i + 1).padStart(2, '0')}</span>
               </div>
               ${scopeNote && html`
-                <div style=${{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                <div class="taxcard-scopenote">
                   ※ この書類は常に全社集計です
                 </div>
               `}

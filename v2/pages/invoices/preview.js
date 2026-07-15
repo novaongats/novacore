@@ -10,6 +10,11 @@
    適格請求書: 税額サマリーは税率ごとに区分した対価の額・適用税率・
    税率ごとの消費税額を表示（calcTotals の byRate）。請求書型では
    hideTaxBreakdown に関わらず必ず表示する（法定記載事項）。
+
+   デザイン: NOVA Precision Dark 由来のブランドヘッダー（Nロゴ +
+   英日タイトル）、ヘアライン主体の明細テーブル、インディゴアクセントの
+   合計ブロック。アクセントは最小限に留め、モノクロ印刷でも成立する
+   （強調は 罫線 + ウェイト + サイズ で担保し、色は補助）。
    ============================================================ */
 
 import { h } from 'https://esm.sh/preact@10.22.0';
@@ -27,6 +32,14 @@ const TITLE_MAP = {
   receipt:  '領収書',
   quote:    '御見積書',
   delivery: '納品書',
+};
+
+// 英字大型タイトル（和文タイトルから引く: TitleBlock の props を変えないため）
+const EN_TITLE_MAP = {
+  '請求書':   'INVOICE',
+  '領収書':   'RECEIPT',
+  '御見積書': 'QUOTE',
+  '納品書':   'DELIVERY NOTE',
 };
 
 const PROMPT_MAP = {
@@ -92,11 +105,29 @@ function A4Document({ doc }) {
   // 適格請求書（invoice）では税率別内訳の記載が必須のため hideTaxBreakdown を無効化
   const showTaxSep = isInvoice || !doc.hideTaxBreakdown;
 
+  // フッター: 発行会社の住所・登録番号（記載データの再掲・見た目のみ）
+  const footerParts = [
+    doc.issuerCompany || '',
+    (doc.issuerPostal || doc.issuerAddress)
+      ? ((doc.issuerPostal ? ('〒' + doc.issuerPostal + ' ') : '') + (doc.issuerAddress || ''))
+      : '',
+    doc.issuerPhone ? ('TEL: ' + doc.issuerPhone) : '',
+    doc.issuerInvoiceNumber ? ('登録番号 ' + doc.issuerInvoiceNumber) : '',
+  ].filter(Boolean);
+
   return html`
     <div class="invoice-a4">
       ${isVoided && html`<div class="invoice-void-badge">取　消</div>`}
 
-      <${TitleBlock} title=${title} />
+      <div class="invoice-doc-header">
+        <div class="invoice-brand">
+          <div class="invoice-brand-logo">N</div>
+          ${doc.issuerCompany && html`
+            <div class="invoice-brand-name">${doc.issuerCompany}</div>
+          `}
+        </div>
+        <${TitleBlock} title=${title} />
+      </div>
 
       <${MetaBlock} doc=${doc} showDue=${isInvoice} showExpiry=${isQuote} />
 
@@ -124,6 +155,11 @@ function A4Document({ doc }) {
       `}
 
       ${isReceipt && html`<${StampArea} showRevenueStamp=${totals.total >= 50000} />`}
+
+      <div class="invoice-footer">
+        <div class="invoice-footer-issuer">${footerParts.join('　·　')}</div>
+        <div class="invoice-footer-credit">NOVA Core</div>
+      </div>
     </div>
   `;
 }
@@ -131,8 +167,10 @@ function A4Document({ doc }) {
 // ---- Blocks ----------------------------------------------------------------
 
 function TitleBlock({ title }) {
+  const en = EN_TITLE_MAP[title] || 'DOCUMENT';
   return html`
     <div class="invoice-title-block">
+      <div class="invoice-title-en">${en}</div>
       <div class="invoice-title">${title}</div>
     </div>
   `;
@@ -158,22 +196,28 @@ function MetaBlock({ doc, showDue, showExpiry }) {
       </div>
 
       <div class="invoice-issuer">
-        <table class="invoice-meta-table">
-          <tr>
-            <th>${showDue ? '請求番号' : showExpiry ? '見積番号' : '書類番号'}</th>
-            <td class="mono">${doc.docNumber || '-'}</td>
-          </tr>
-          <tr>
-            <th>発行日</th>
-            <td>${formatDate(doc.issueDate)}</td>
-          </tr>
+        <div class="invoice-meta-rows">
+          <div class="invoice-meta-row">
+            <span class="invoice-meta-label">${showDue ? '請求番号' : showExpiry ? '見積番号' : '書類番号'}</span>
+            <span class="invoice-meta-value mono">${doc.docNumber || '-'}</span>
+          </div>
+          <div class="invoice-meta-row">
+            <span class="invoice-meta-label">発行日</span>
+            <span class="invoice-meta-value num">${formatDate(doc.issueDate)}</span>
+          </div>
           ${showDue && doc.dueDate && html`
-            <tr><th>お支払期限</th><td>${formatDate(doc.dueDate)}</td></tr>
+            <div class="invoice-meta-row">
+              <span class="invoice-meta-label">お支払期限</span>
+              <span class="invoice-meta-value num">${formatDate(doc.dueDate)}</span>
+            </div>
           `}
           ${showExpiry && doc.dueDate && html`
-            <tr><th>有効期限</th><td>${formatDate(doc.dueDate)}</td></tr>
+            <div class="invoice-meta-row">
+              <span class="invoice-meta-label">有効期限</span>
+              <span class="invoice-meta-value num">${formatDate(doc.dueDate)}</span>
+            </div>
           `}
-        </table>
+        </div>
 
         <div class="invoice-issuer-box">
           <div class="invoice-issuer-name">${doc.issuerCompany || ''}</div>
@@ -234,7 +278,7 @@ function ItemsTable({ items }) {
           const gross = Math.round(qty * price);
           return html`
             <tr key=${idx}>
-              <td>${idx + 1}</td>
+              <td class="num">${idx + 1}</td>
               <td class="invoice-items-name">
                 ${it.name || ''}
                 ${it.memo && html`<div class="invoice-items-memo">${it.memo}</div>`}
@@ -252,7 +296,7 @@ function ItemsTable({ items }) {
         ${/* Fill empty rows to keep table consistent height */
           Array.from({ length: Math.max(0, 6 - items.length) }).map((_, i) => html`
             <tr key=${'empty-' + i}>
-              <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <td>${' '}</td><td></td><td></td><td></td><td></td><td></td><td></td>
             </tr>
           `)}
       </tbody>
@@ -333,7 +377,7 @@ function BankBlock({ doc }) {
         <tr>
           <th>口座名義</th>
           <td>${doc.bankAccountHolder || ''}
-            ${doc.bankAccountHolderKana && html`<span style=${{ marginLeft: 8, fontSize: 10, color: '#666' }}>
+            ${doc.bankAccountHolderKana && html`<span style=${{ marginLeft: 8, fontSize: 10, color: '#64748b' }}>
               (${doc.bankAccountHolderKana})
             </span>`}
           </td>
@@ -373,125 +417,187 @@ const printCss = html`
   /* Screen overlay */
   .preview-overlay {
     position: fixed; inset: 0;
-    background: rgba(15, 23, 42, 0.92);
+    background: rgba(10, 12, 22, 0.9);
     z-index: 99999;
     display: flex; flex-direction: column;
   }
   .preview-toolbar {
     padding: 12px 20px;
-    background: #1e293b;
+    background: #161a26;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     display: flex; justify-content: space-between; align-items: center;
     flex-shrink: 0;
   }
   .preview-a4-wrap {
     flex: 1; overflow: auto;
-    padding: 30px;
+    padding: 36px 30px 56px;
     display: flex; justify-content: center; align-items: flex-start;
-    background: #2a3442;
+    background: #232936;
   }
 
-  /* A4 page */
+  /* A4 page
+     画面表示は flex column（フッターを margin-top:auto で最下部へ）。
+     印刷時は display:block に戻す（flex はページ分割と相性が悪いため）。 */
   .invoice-a4 {
     position: relative;
     width: 210mm;
     min-height: 297mm;
-    padding: 18mm 20mm;
+    padding: 16mm 18mm 12mm;
     background: #fff;
-    color: #000;
+    color: #0f172a;
     font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif;
-    font-size: 11pt;
-    line-height: 1.6;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+    font-size: 10.5pt;
+    line-height: 1.65;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
     box-sizing: border-box;
+    display: flex; flex-direction: column;
   }
+  /* 等幅数字（styles.css の .num に依存せず自前でも定義しておく） */
+  .invoice-a4 .num {
+    font-family: 'Inter', 'Sora', 'Noto Sans JP', sans-serif;
+    font-feature-settings: 'tnum' 1, 'lnum' 1;
+  }
+  .invoice-a4 .mono { font-family: 'JetBrains Mono', 'Menlo', monospace; }
 
-  /* Void (取消) badge */
+  /* Void (取消) badge — 1ページ目中央に斜めの取消スタンプ（透かし風）。
+     % ではなく mm 指定なので、複数ページ時も印刷1ページ目に載る。 */
   .invoice-void-badge {
     position: absolute;
-    top: 14mm; right: 16mm;
-    padding: 4pt 14pt;
-    border: 2pt solid #c00;
-    color: #c00;
-    font-size: 16pt;
+    top: 100mm; left: 50%;
+    padding: 8pt 30pt;
+    border: 3pt solid #dc2626;
+    border-radius: 6pt;
+    color: #dc2626;
+    font-size: 34pt;
     font-weight: 800;
-    letter-spacing: 0.3em;
-    transform: rotate(-8deg);
-    opacity: 0.75;
+    letter-spacing: 0.4em;
+    padding-right: calc(30pt - 0.4em);
+    white-space: nowrap;
+    transform: translateX(-50%) rotate(-10deg);
+    opacity: 0.32;
+    z-index: 2;
+    pointer-events: none;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  /* Title */
-  .invoice-title-block {
-    text-align: center;
-    margin-bottom: 18pt;
+  /* Brand header: N logo + issuer | large EN/JP title */
+  .invoice-doc-header {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 16pt;
     padding-bottom: 10pt;
-    border-bottom: 2pt solid #000;
+    border-bottom: 2pt solid #0f172a;
+    margin-bottom: 14pt;
+  }
+  .invoice-brand {
+    display: flex; align-items: center; gap: 8pt;
+    padding-bottom: 3pt;
+  }
+  .invoice-brand-logo {
+    width: 24pt; height: 24pt;
+    border-radius: 6pt;
+    background: #6366f1;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Sora', 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 14pt;
+    line-height: 1;
+    flex-shrink: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .invoice-brand-name {
+    font-size: 12pt;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .invoice-title-block {
+    text-align: right;
+  }
+  .invoice-title-en {
+    font-family: 'Sora', 'Inter', sans-serif;
+    font-size: 24pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.05;
+    white-space: nowrap;
   }
   .invoice-title {
-    font-size: 26pt;
-    font-weight: 800;
-    letter-spacing: 0.5em;
-    padding-left: 0.5em;  /* compensate letter-spacing */
+    font-size: 9pt;
+    font-weight: 600;
+    letter-spacing: 0.45em;
+    margin-right: -0.45em;  /* compensate letter-spacing */
+    margin-top: 3pt;
+    color: #6366f1;
   }
 
-  /* Meta block (client + issuer) */
+  /* Meta block (client + doc meta / issuer) */
   .invoice-meta {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20pt;
-    margin-bottom: 16pt;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 24pt;
+    margin-bottom: 14pt;
   }
   .invoice-client {
-    padding-top: 8pt;
+    padding-top: 4pt;
   }
   .invoice-client-name {
-    font-size: 18pt;
+    font-size: 16pt;
     font-weight: 700;
     padding-bottom: 6pt;
-    border-bottom: 1pt solid #000;
+    border-bottom: 0.75pt solid #cbd5e1;
     margin-bottom: 6pt;
   }
   .invoice-client-honorific {
-    font-size: 14pt;
+    font-size: 12pt;
     font-weight: 500;
-    margin-left: 10pt;
+    margin-left: 8pt;
+    color: #334155;
   }
   .invoice-client-address {
-    font-size: 10pt;
-    color: #222;
+    font-size: 9.5pt;
+    color: #334155;
     margin-top: 3pt;
   }
   .invoice-client-contact {
-    font-size: 10pt;
-    color: #222;
+    font-size: 9.5pt;
+    color: #334155;
     margin-top: 4pt;
   }
 
   .invoice-issuer {
     font-size: 9.5pt;
   }
-  .invoice-meta-table {
-    width: 100%;
+  /* 書類番号・発行日: マイクロラベル + 等幅数字 */
+  .invoice-meta-rows {
     margin-bottom: 10pt;
-    border-collapse: collapse;
   }
-  .invoice-meta-table th {
-    text-align: left;
-    font-weight: 500;
-    color: #444;
-    padding: 2pt 6pt 2pt 0;
-    width: 38%;
+  .invoice-meta-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 8pt;
+    padding: 2.5pt 0;
+    border-bottom: 0.5pt solid #e2e8f0;
   }
-  .invoice-meta-table td {
-    text-align: right;
-    padding: 2pt 0;
+  .invoice-meta-label {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    color: #64748b;
+    white-space: nowrap;
+  }
+  .invoice-meta-value {
+    font-size: 10pt;
+    font-weight: 600;
   }
   .invoice-issuer-box {
-    padding: 8pt 10pt;
-    background: #f7f7f7;
-    border-radius: 4pt;
-    line-height: 1.5;
+    padding: 9pt 11pt;
+    background: #f8fafc;
+    border: 0.5pt solid #e2e8f0;
+    border-radius: 6pt;
+    line-height: 1.55;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .invoice-issuer-name {
     font-weight: 700;
@@ -499,47 +605,52 @@ const printCss = html`
     margin-bottom: 2pt;
   }
   .invoice-issuer-addr {
-    font-size: 9pt;
-    color: #333;
+    font-size: 8.5pt;
+    color: #475569;
   }
   .invoice-issuer-invnum {
-    font-size: 9pt;
-    color: #000;
-    margin-top: 4pt;
-    padding-top: 4pt;
-    border-top: 1px dashed #999;
+    font-size: 8.5pt;
+    color: #0f172a;
+    margin-top: 5pt;
+    padding-top: 5pt;
+    border-top: 0.5pt dashed #cbd5e1;
   }
 
   .invoice-prompt {
-    margin-bottom: 14pt;
-    font-size: 11pt;
+    margin-bottom: 12pt;
+    font-size: 10.5pt;
+    color: #1e293b;
   }
 
-  /* Grand total (highlighted) */
+  /* Grand total (hero block — indigo accent, mono-print safe:
+     背景が印刷されない設定でも左ボーダー + ウェイトで成立する) */
   .invoice-grand-total {
     display: flex; justify-content: space-between; align-items: center;
     padding: 10pt 16pt;
-    background: #fff;
-    border: 2pt solid #000;
+    background: #f4f5ff;
+    border-left: 4pt solid #6366f1;
+    border-radius: 0 6pt 6pt 0;
     margin-bottom: 14pt;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
   .invoice-grand-total-label {
-    font-size: 13pt;
+    font-size: 11pt;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.14em;
   }
   .invoice-grand-total-value {
-    font-size: 20pt;
+    font-size: 22pt;
     font-weight: 800;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
+    color: #312e81;
   }
   .invoice-grand-total-taxinc {
     font-size: 10pt;
     margin-left: 8pt;
     font-weight: 500;
-    color: #555;
+    color: #64748b;
+    letter-spacing: 0;
   }
 
   /* 但し書き (receipt) */
@@ -547,10 +658,10 @@ const printCss = html`
     margin: -6pt 0 14pt;
     padding: 2pt 4pt;
     font-size: 10.5pt;
-    border-bottom: 0.5pt solid #999;
+    border-bottom: 0.5pt solid #cbd5e1;
   }
 
-  /* Items table */
+  /* Items table — hairline rows, no vertical rules */
   .invoice-items {
     width: 100%;
     border-collapse: collapse;
@@ -558,20 +669,25 @@ const printCss = html`
     font-size: 10pt;
   }
   .invoice-items th {
-    background: #f0f0f0;
-    padding: 6pt 6pt;
-    border: 0.5pt solid #333;
+    padding: 4pt 6pt 5pt;
+    border: none;
+    border-bottom: 1.5pt solid #0f172a;
     text-align: left;
     font-weight: 600;
-    font-size: 9.5pt;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    font-size: 8pt;
+    letter-spacing: 0.14em;
+    color: #475569;
   }
   .invoice-items td {
     padding: 6pt 6pt;
-    border: 0.5pt solid #999;
+    border: none;
+    border-bottom: 0.5pt solid #e2e8f0;
     vertical-align: top;
     min-height: 16pt;
+  }
+  .invoice-items td:first-child {
+    color: #94a3b8;
+    font-size: 9pt;
   }
   /* 複数ページ: 行の途中で改ページさせない（15行超は2ページ目に続く） */
   .invoice-items tr {
@@ -585,84 +701,104 @@ const printCss = html`
     font-weight: 500;
   }
   .invoice-items-memo {
-    font-size: 9pt;
-    color: #666;
+    font-size: 8.5pt;
+    color: #64748b;
     margin-top: 2pt;
   }
   .invoice-reduced-note {
-    font-size: 9pt;
-    color: #555;
+    font-size: 8.5pt;
+    color: #64748b;
     margin-top: 4pt;
     padding-bottom: 8pt;
   }
 
-  /* Tax summary (right-aligned) */
+  /* Tax summary (right-aligned stack, total row = indigo rule + large bold) */
   .invoice-tax-summary {
     margin-left: auto;
     margin-bottom: 14pt;
     border-collapse: collapse;
-    min-width: 260pt;
+    min-width: 250pt;
     page-break-inside: avoid;
     break-inside: avoid;
   }
   .invoice-tax-summary th {
     text-align: left;
-    padding: 4pt 14pt 4pt 10pt;
+    padding: 3.5pt 14pt 3.5pt 10pt;
     font-weight: 500;
-    color: #222;
-    font-size: 10pt;
+    color: #475569;
+    font-size: 9.5pt;
+    border-bottom: 0.5pt solid #eef1f6;
   }
   .invoice-tax-summary td {
     text-align: right;
-    padding: 4pt 10pt;
+    padding: 3.5pt 10pt;
     font-size: 10pt;
     min-width: 80pt;
+    border-bottom: 0.5pt solid #eef1f6;
   }
   .invoice-tax-summary-total th,
   .invoice-tax-summary-total td {
     font-weight: 800;
-    font-size: 12pt;
-    border-top: 1pt solid #000;
+    font-size: 13pt;
+    border-top: 2pt solid #6366f1;
+    border-bottom: none;
     padding-top: 6pt;
   }
+  .invoice-tax-summary-total td {
+    color: #312e81;
+  }
 
-  /* Notes */
+  /* Notes — light card (print-safe grey) */
   .invoice-notes {
     margin: 10pt 0;
-    padding: 10pt 12pt;
-    border: 0.5pt solid #999;
-    border-radius: 4pt;
+    padding: 9pt 12pt;
+    background: #f8fafc;
+    border: 0.5pt solid #e2e8f0;
+    border-radius: 6pt;
     page-break-inside: avoid;
     break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .invoice-notes-label {
-    font-size: 9pt;
-    color: #666;
+    font-size: 7.5pt;
+    letter-spacing: 0.18em;
+    color: #64748b;
     font-weight: 600;
-    margin-bottom: 4pt;
+    margin-bottom: 3pt;
   }
   .invoice-notes-body {
-    font-size: 10pt;
+    font-size: 9.5pt;
     white-space: pre-wrap;
   }
 
-  /* Bank info */
+  /* Bank info — light card */
   .invoice-bank {
-    margin-top: 14pt;
+    margin-top: 12pt;
     padding: 10pt 14pt;
-    border: 1pt solid #000;
-    background: #fafafa;
+    background: #f8fafc;
+    border: 0.5pt solid #e2e8f0;
+    border-radius: 6pt;
     page-break-inside: avoid;
     break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
   .invoice-bank-title {
+    display: flex; align-items: center; gap: 5pt;
     font-weight: 700;
-    font-size: 11pt;
+    font-size: 9pt;
+    letter-spacing: 0.14em;
     margin-bottom: 6pt;
-    padding-bottom: 4pt;
-    border-bottom: 0.5pt solid #000;
+    color: #0f172a;
+  }
+  .invoice-bank-title::before {
+    content: '';
+    width: 5pt; height: 5pt;
+    border-radius: 1.5pt;
+    background: #6366f1;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .invoice-bank-table {
     width: 100%;
@@ -674,7 +810,8 @@ const printCss = html`
     width: 90pt;
     padding: 2pt 0;
     font-weight: 500;
-    color: #444;
+    color: #64748b;
+    font-size: 9pt;
   }
   .invoice-bank-table td {
     padding: 2pt 0;
@@ -690,12 +827,13 @@ const printCss = html`
   }
   .invoice-stamp-box {
     width: 50pt; height: 50pt;
-    border: 1pt solid #c00;
-    color: #c00;
+    border: 1pt solid #dc2626;
+    color: #dc2626;
     display: flex; align-items: center; justify-content: center;
     font-size: 10pt;
     border-radius: 50%;
     opacity: 0.6;
+    flex-shrink: 0;
   }
   /* 収入印紙欄（5万円以上の領収書） */
   .invoice-revenue-stamp {
@@ -703,8 +841,9 @@ const printCss = html`
   }
   .invoice-revenue-stamp-box {
     width: 56pt; height: 66pt;
-    border: 1pt dashed #666;
-    color: #666;
+    border: 1pt dashed #94a3b8;
+    color: #64748b;
+    border-radius: 3pt;
     display: flex; align-items: center; justify-content: center;
     font-size: 9pt;
     letter-spacing: 0.1em;
@@ -712,8 +851,28 @@ const printCss = html`
   }
   .invoice-revenue-stamp-note {
     font-size: 7.5pt;
-    color: #999;
+    color: #94a3b8;
     margin-top: 2pt;
+  }
+
+  /* Footer — issuer credit line (画面ではページ最下部に固定) */
+  .invoice-footer {
+    margin-top: auto;
+    padding-top: 8pt;
+    border-top: 0.5pt solid #e2e8f0;
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12pt;
+    font-size: 7.5pt;
+    color: #94a3b8;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .invoice-footer-credit {
+    font-family: 'Sora', 'Inter', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: #c7cbdd;
+    white-space: nowrap;
   }
 
   .mono { font-family: 'JetBrains Mono', 'Menlo', monospace; }
@@ -737,10 +896,14 @@ const printCss = html`
       background: #fff !important;
     }
     .invoice-a4 {
+      display: block;      /* flex はページ分割（page-break）と相性が悪い */
       width: 210mm;
       min-height: auto;   /* 297mm 固定だと末尾に空白ページが出るため */
       margin: 0;
       box-shadow: none;
+    }
+    .invoice-footer {
+      margin-top: 16pt;   /* block レイアウトでは auto が効かないため */
     }
   }
 </style>
